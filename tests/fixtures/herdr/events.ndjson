@@ -1,0 +1,7 @@
+{"id":"sub_1","result":{"type":"subscription_started"}}
+{"data":{"pane":{"agent":"claude","agent_session":{"agent":"claude","kind":"id","source":"herdr:claude","value":"1449e6ef-d257-44a9-b620-306984070c49"},"agent_status":"working","cwd":"/home/haksolot/.herdr/worktrees/herdr-ank/agent-ank-2","focused":false,"foreground_cwd":"/home/haksolot/.herdr/worktrees/herdr-ank/agent-ank-2","pane_id":"wN:p2","revision":6,"scroll":{"max_offset_from_bottom":0,"offset_from_bottom":0,"viewport_rows":60},"tab_id":"wN:t2","terminal_id":"term_65c51e1d862f718","terminal_title":"◑ Ank-loop backlog processing","terminal_title_stripped":"Ank-loop backlog processing","tokens":{"probe":"1"},"workspace_id":"wN"},"type":"pane_updated"},"event":"pane_updated"}
+{"data":{"agent":"claude","agent_status":"done","display_agent":null,"pane_id":"wN:p2","state_labels":{},"title":null,"workspace_id":"wN","type":"pane_agent_status_changed"},"event":"pane.agent_status_changed"}
+{"data":{"pane_id":"wN:p2","destination":"elsewhere","type":"pane_teleported"},"event":"pane_teleported"}
+{"data":{"pane_id":"wN:p3","workspace_id":"wN","type":"pane_closed","a_field_from_protocol_23":1},"event":"pane_closed"}
+{"data":{"tab_id":"wN:t2","workspace_id":"wN","type":"tab_focused"},"event":"tab_focused"}
+{"data":{"pane":{"agent":null,"agent_status":"unknown","focused":false,"pane_id":"wN:p4","revision":0,"tab_id":"wN:t2","terminal_id":"term_1","workspace_id":"wN"},"type":"pane_created"},"event":"pane_created"}
