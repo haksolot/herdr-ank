@@ -98,6 +98,14 @@ impl Sound {
     }
 }
 
+/// A plugin pane herdr opened.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct PluginPane {
+    pub plugin_id: String,
+    pub entrypoint: String,
+    pub pane: Pane,
+}
+
 /// `herdr worktree create`.
 #[derive(Debug, Clone)]
 pub struct WorktreeCreate<'a> {
@@ -163,6 +171,11 @@ struct AgentList {
 #[derive(Deserialize)]
 struct RootPane {
     root_pane: Pane,
+}
+
+#[derive(Deserialize)]
+struct PluginPaneOpened {
+    plugin_pane: PluginPane,
 }
 
 #[derive(Deserialize)]
@@ -293,6 +306,35 @@ impl Client {
     pub fn agent_prompt(&self, target: &str, text: &str) -> Result<(), HerdrError> {
         self.run::<Ignored>(argv(["agent", "prompt", target, text]))
             .map(drop)
+    }
+
+    /// Opens this plugin's pane `entrypoint`, focused, at the placement its
+    /// manifest declares: the CLI's `--placement` does not take `popup`.
+    pub fn plugin_pane_open(
+        &self,
+        entrypoint: &str,
+        workspace: Option<&str>,
+        env: &[(&str, &str)],
+    ) -> Result<PluginPane, HerdrError> {
+        let mut args = argv([
+            "plugin",
+            "pane",
+            "open",
+            "--plugin",
+            SOURCE,
+            "--entrypoint",
+            entrypoint,
+        ]);
+        if let Some(workspace) = workspace {
+            args.push("--workspace".into());
+            args.push(workspace.into());
+        }
+        for (key, value) in env {
+            args.push("--env".into());
+            args.push(format!("{key}={value}").into());
+        }
+        args.push("--focus".into());
+        Ok(self.run::<PluginPaneOpened>(args)?.plugin_pane)
     }
 
     /// Runs `herdr <args>` without a shell and decodes its `result`.

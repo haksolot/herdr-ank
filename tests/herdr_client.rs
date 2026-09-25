@@ -505,3 +505,75 @@ fn subscribe_to_an_absent_socket_is_a_herdr_error() {
         Err(HerdrError::Io { .. })
     ));
 }
+
+#[test]
+fn plugin_pane_open_names_the_entrypoint_and_returns_the_opened_pane() {
+    let fake = FakeHerdr::answering(
+        "plugin-pane-open",
+        &format!(
+            r#"{{"id":"cli:plugin","result":{{"type":"plugin_pane_opened","plugin_pane":{{"plugin_id":"ank","entrypoint":"pick","pane":{PANE},"opened_by":"a field herdr added later"}}}}}}"#
+        ),
+    );
+    let opened = fake
+        .client()
+        .plugin_pane_open("pick", Some("w1"), &[("ANK_WORK", "1"), ("A", "b=c")])
+        .unwrap();
+    assert_eq!(
+        fake.argv(),
+        [
+            "plugin",
+            "pane",
+            "open",
+            "--plugin",
+            "ank",
+            "--entrypoint",
+            "pick",
+            "--workspace",
+            "w1",
+            "--env",
+            "ANK_WORK=1",
+            "--env",
+            "A=b=c",
+            "--focus"
+        ]
+    );
+    assert_eq!(opened.entrypoint, "pick");
+    assert_eq!(opened.pane.pane_id, "w1:p2");
+}
+
+#[test]
+fn plugin_pane_open_without_workspace_or_env_passes_neither() {
+    let fake = FakeHerdr::answering(
+        "plugin-pane-open-bare",
+        &format!(
+            r#"{{"id":"cli:plugin","result":{{"type":"plugin_pane_opened","plugin_pane":{{"plugin_id":"ank","entrypoint":"tui","pane":{PANE}}}}}}}"#
+        ),
+    );
+    fake.client().plugin_pane_open("tui", None, &[]).unwrap();
+    assert_eq!(
+        fake.argv(),
+        [
+            "plugin",
+            "pane",
+            "open",
+            "--plugin",
+            "ank",
+            "--entrypoint",
+            "tui",
+            "--focus"
+        ]
+    );
+}
+
+#[test]
+fn plugin_pane_open_refused_is_an_api_error() {
+    // As herdr 0.9.1 answers an unknown entrypoint: the body on stderr, exit 1.
+    let fake = FakeHerdr::failing(
+        "plugin-pane-open-error",
+        r#"{"error":{"code":"plugin_pane_not_found","message":"plugin pane entrypoint 'nope' not found"},"id":"cli:plugin"}"#,
+    );
+    match fake.client().plugin_pane_open("nope", None, &[]) {
+        Err(HerdrError::Api { code, .. }) => assert_eq!(code, "plugin_pane_not_found"),
+        other => panic!("expected an Api error, got {other:?}"),
+    }
+}
