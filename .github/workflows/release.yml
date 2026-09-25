@@ -101,3 +101,56 @@ jobs:
           sha256sum -- "$@" > SHA256SUMS
           gh release create "v${VERSION}" --repo "$GITHUB_REPOSITORY" --verify-tag \
             --title "v${VERSION}" -- "$@" SHA256SUMS
+
+  # The measurement of TASK-dd28, replayed on every release and on the three
+  # OSes: the plugin installs from the fresh release with no cargo on PATH, as
+  # herdr's [[build]] would run it, and the binary it lands is the tag's.
+  smoke:
+    needs: [version, release]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+      - if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euf
+          path=
+          IFS=:
+          for dir in $PATH; do
+            [ -x "$dir/cargo" ] || path=${path:+$path:}$dir
+          done
+          unset IFS
+          export PATH="$path"
+          if command -v cargo; then
+            echo "::error::cargo is still on PATH"
+            exit 1
+          fi
+          sh install.sh
+          out=$(./bin/herdr-ank --version)
+          echo "$out"
+          test "$out" = "herdr-ank $VERSION"
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:PATH = ($env:PATH -split ';' |
+            Where-Object { $_ -and -not (Test-Path -LiteralPath (Join-Path $_ 'cargo.exe')) }) -join ';'
+          if (Get-Command cargo -ErrorAction SilentlyContinue) {
+            Write-Output '::error::cargo is still on PATH'
+            exit 1
+          }
+          powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $out = ./bin/herdr-ank --version
+          Write-Output $out
+          if ($out -ne "herdr-ank $env:VERSION") {
+            Write-Output "::error::expected herdr-ank $env:VERSION, got $out"
+            exit 1
+          }

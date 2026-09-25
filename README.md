@@ -12,18 +12,18 @@ of its subcommands. It reads and writes the corpus only through
 ## Install
 
 Requires herdr ≥ 0.9.1 and `ank` on `PATH`. Linux and macOS, x86_64 and
-aarch64.
+aarch64; Windows, x86_64, with Windows PowerShell 5.1 (what Windows ships).
 
 ```sh
-herdr plugin install haksolot/herdr-ank        # asks before running install.sh
+herdr plugin install haksolot/herdr-ank        # asks before running the install script
 herdr plugin install haksolot/herdr-ank --yes  # without the prompt
 herdr plugin list --json                       # lists "ank"
 ```
 
-herdr runs the manifest's `[[build]]`, `sh install.sh`, in the plugin's
-directory. The script reads `version` from `herdr-plugin.toml`, picks the
-archive of the platform `uname -sm` names, and downloads it with its sums from
-the GitHub release `v<version>`:
+On Linux and macOS herdr runs the manifest's `[[build]]`, `sh install.sh`, in
+the plugin's directory. The script reads `version` from `herdr-plugin.toml`,
+picks the archive of the platform `uname -sm` names, and downloads it with its
+sums from the GitHub release `v<version>`:
 
 ```
 https://github.com/haksolot/herdr-ank/releases/download/v<version>/herdr-ank-<version>-<target>.tar.gz
@@ -42,6 +42,16 @@ without an archive, a download or a sum that fails. Then, if `cargo` is on
 `target/release/herdr-ank` into `./bin/`; without cargo it exits 1, naming the
 URL it tried (or the platform) and the missing cargo.
 `HERDR_ANK_RELEASE_BASE` replaces the release URL, `file://` included.
+
+On Windows the `[[build]]` is `powershell -NoProfile -ExecutionPolicy Bypass
+-File install.ps1`, under the same contract: it downloads
+`herdr-ank-<version>-x86_64-pc-windows-msvc.zip` and `SHA256SUMS` from the same
+release, checks the sum with `Get-FileHash`, and puts `herdr-ank.exe` in
+`.\bin\`, which herdr runs for every `./bin/herdr-ank` of the manifest. Without
+the archive it falls back to `cargo build --release` when cargo is present, and
+otherwise exits 1 naming the URL and the missing cargo.
+`HERDR_ANK_RELEASE_BASE` may also name a local directory holding the archive
+and its sums.
 
 For development, link a checkout instead. `link` never builds, and
 `install.sh` would fetch the released binary rather than your changes, so build

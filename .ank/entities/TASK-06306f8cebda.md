@@ -5,7 +5,7 @@ slug: le-workflow-de-release-installe-le-plugin-depuis
 title: Le workflow de release installe le plugin depuis la release fraîche sur les trois OS, et la version passe à 0.2.0
 created: 2026-09-25T19:06:40Z
 author: haksolot@omarchy
-status: open
+status: in_progress
 scope:
   - .github/workflows/release.yml
   - Cargo.toml
@@ -18,7 +18,7 @@ done_criteria: |
 criteria_by: creator
 verify: [cargo-test, clippy, fmt-check]
 schema: 4
-version: 1
+version: 2
 ---
 
 Dernière tâche avant la release v0.2.0, que l'humain pose. Le job smoke
