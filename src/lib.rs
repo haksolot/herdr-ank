@@ -3,4 +3,6 @@
 pub mod ank;
 pub mod config;
 pub mod herdr;
+pub mod pick;
 pub mod sync;
+pub mod work;

@@ -7,3 +7,15 @@ platforms = ["linux", "macos"]
 
 [[build]]
 command = ["cargo", "build", "--release"]
+
+[[actions]]
+id = "work"
+title = "Work a task"
+contexts = ["workspace"]
+command = ["./target/release/herdr-ank", "work"]
+
+[[panes]]
+id = "pick"
+title = "Pick a task"
+placement = "popup"
+command = ["./target/release/herdr-ank", "pick"]

@@ -5,7 +5,7 @@ slug: action-travailler-une-t-che-choisir-cr-er-le-wor
 title: "Action « travailler une tâche » : choisir, créer le worktree, démarrer l'agent avec son identité, faire claim"
 created: 2026-09-25T16:54:28Z
 author: haksolot@omarchy
-status: open
+status: done
 scope:
   - src/work/**
   - src/pick.rs
@@ -21,8 +21,27 @@ done_criteria: |
 criteria_by: creator
 verify: [cargo-test, clippy, fmt-check]
 method: tdd
+proof:
+  - type: test
+    ref: local/fc13882bf8fb@633bb57
+    tree: scope/03fff7c00456
+    criteria: 0e600bc85fa1
+    verifier: cargo-test@f14aeab36e1b
+    via: verifier
+  - type: test
+    ref: local/e3b0c44298fc@633bb57
+    tree: scope/03fff7c00456
+    criteria: 0e600bc85fa1
+    verifier: clippy@d335c02ef52c
+    via: verifier
+  - type: test
+    ref: local/e3b0c44298fc@633bb57
+    tree: scope/03fff7c00456
+    criteria: 0e600bc85fa1
+    verifier: fmt-check@5ca6d10bcd55
+    via: verifier
 schema: 4
-version: 2
+version: 3
 ---
 
 La fonction qui applique « un agent, un arbre, une identité » sans que
