@@ -1,12 +1,18 @@
 //! The boundary with ank (ADR-3cd19cd6acb9): everything the plugin knows of a
 //! corpus comes through `ank <verb> --json --repo <repo>`, and nothing else in
 //! the crate spawns `ank`.
+//!
+//! The plugin reads as `<user>@<host>/herdr-ank`: an identity that never holds
+//! a claim, so `context` stays in orientation mode even while the bare
+//! `<user>@<host>` holds one, and no herdr agent `work` starts can carry it,
+//! their names beginning with `ank-` (ADR-fa8b6a103597).
 
 use std::ffi::OsStr;
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 
 use serde::de::DeserializeOwned;
 
@@ -17,11 +23,18 @@ pub use types::*;
 /// The only document contract this client reads.
 pub const CONTRACT: u64 = 1;
 
+/// The agent name of the plugin's own identity.
+pub const PLUGIN_AGENT: &str = "herdr-ank";
+
+const ANK_AGENT: &str = "ANK_AGENT";
+
 /// Runs ank over one repository.
 #[derive(Debug, Clone)]
 pub struct Client {
     program: PathBuf,
     repo: PathBuf,
+    /// `<user>@<host>/herdr-ank`, asked of ank once.
+    identity: OnceLock<String>,
 }
 
 impl Client {
@@ -35,7 +48,41 @@ impl Client {
         Self {
             program: program.into(),
             repo: repo.to_path_buf(),
+            identity: OnceLock::new(),
         }
+    }
+
+    /// `ank <verb> <args> --json --repo <repo>`, run as the plugin's identity.
+    pub fn command<S: AsRef<OsStr>>(&self, verb: &str, args: &[S]) -> Result<Command, AnkError> {
+        let mut command = self.bare(verb, args);
+        command.env(ANK_AGENT, self.identity()?);
+        Ok(command)
+    }
+
+    /// The plugin's identity on this corpus: the fallback `<user>@<host>` ank
+    /// computes itself (asked with `ANK_AGENT` removed), suffixed `/herdr-ank`.
+    fn identity(&self) -> Result<&str, AnkError> {
+        if let Some(identity) = self.identity.get() {
+            return Ok(identity);
+        }
+        let mut probe = self.bare("status", &[] as &[&str]);
+        probe.env_remove(ANK_AGENT);
+        let status: Status = read(probe)?;
+        let user_host = status.identity.value.split('/').next().unwrap_or_default();
+        Ok(self
+            .identity
+            .get_or_init(|| format!("{user_host}/{PLUGIN_AGENT}")))
+    }
+
+    fn bare<S: AsRef<OsStr>>(&self, verb: &str, args: &[S]) -> Command {
+        let mut command = Command::new(&self.program);
+        command
+            .arg(verb)
+            .args(args)
+            .arg("--json")
+            .arg("--repo")
+            .arg(&self.repo);
+        command
     }
 
     pub fn program(&self) -> &Path {
@@ -74,36 +121,54 @@ impl Client {
         verb: &str,
         args: &[S],
     ) -> Result<T, AnkError> {
-        let output = Command::new(&self.program)
-            .arg(verb)
-            .args(args)
-            .arg("--json")
-            .arg("--repo")
-            .arg(&self.repo)
-            .output()
-            .map_err(AnkError::Spawn)?;
-
-        // The code is routed before anything is parsed: a refusal leaves stdout empty.
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-            return Err(match output.status.code() {
-                Some(code @ 1..=9) => AnkError::Exit {
-                    code: code as u8,
-                    kind: ExitKind::from_code(code as u8),
-                    stderr,
-                },
-                code => AnkError::Abnormal { code, stderr },
-            });
-        }
-
-        let value: serde_json::Value =
-            serde_json::from_slice(&output.stdout).map_err(AnkError::Json)?;
-        let contract = value.get("contract").and_then(serde_json::Value::as_u64);
-        if contract != Some(CONTRACT) {
-            return Err(AnkError::Contract { found: contract });
-        }
-        serde_json::from_value(value).map_err(AnkError::Json)
+        read(self.command(verb, args)?)
     }
+}
+
+/// Runs `command` and reads its stdout as a document of this contract.
+fn read<T: DeserializeOwned>(mut command: Command) -> Result<T, AnkError> {
+    let output = command.output().map_err(AnkError::Spawn)?;
+    check(&output)?;
+    let value: serde_json::Value =
+        serde_json::from_slice(&output.stdout).map_err(AnkError::Json)?;
+    let contract = value.get("contract").and_then(serde_json::Value::as_u64);
+    if contract != Some(CONTRACT) {
+        return Err(AnkError::Contract { found: contract });
+    }
+    serde_json::from_value(value).map_err(AnkError::Json)
+}
+
+/// The exit code, routed before anything is parsed: a refusal leaves stdout empty.
+fn check(output: &std::process::Output) -> Result<(), AnkError> {
+    if output.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    Err(match output.status.code() {
+        Some(code @ 1..=9) => AnkError::Exit {
+            code: code as u8,
+            kind: ExitKind::from_code(code as u8),
+            stderr,
+        },
+        code => AnkError::Abnormal { code, stderr },
+    })
+}
+
+/// `events.jsonl` beside the `watch.yml` that `ank watch --where` names; the
+/// file itself may not exist yet. `watch` addresses no corpus and refuses
+/// `--repo`, so it reads nothing as anyone: it runs without the plugin
+/// identity, which only a corpus can tell.
+pub fn events_jsonl(program: &Path) -> Result<PathBuf, AnkError> {
+    let output = Command::new(program)
+        .args(["watch", "--where"])
+        .output()
+        .map_err(AnkError::Spawn)?;
+    check(&output)?;
+    let watch_yml = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+    Ok(watch_yml
+        .parent()
+        .unwrap_or(Path::new(""))
+        .join("events.jsonl"))
 }
 
 /// `ank tui` for the human at the pane: run with the corpus as its cwd, and

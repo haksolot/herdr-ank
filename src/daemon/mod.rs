@@ -11,7 +11,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -151,9 +150,6 @@ fn parse_utc(s: &str) -> Option<u64> {
 
 /// `herdr-ank daemon`.
 pub fn run() -> Result<(), String> {
-    // ank must answer as the bare <user>@<host> herdr runs under, not as
-    // whatever agent pane herdr happened to be started from.
-    std::env::remove_var("ANK_AGENT");
     let state_dir = env_path("HERDR_PLUGIN_STATE_DIR")?;
     let Some(_lock) =
         Lock::acquire(&state_dir).map_err(|e| format!("herdr-ank daemon: lock: {e}"))?
@@ -170,7 +166,7 @@ pub fn run() -> Result<(), String> {
         let tx = tx.clone();
         thread::spawn(move || subscribe_forever(&herdr, &tx));
     }
-    if let Some(events) = events_jsonl() {
+    if let Ok(events) = ank::events_jsonl(Path::new("ank")) {
         let tx = tx.clone();
         thread::spawn(move || tail_forever(&events, &tx));
     }
@@ -360,20 +356,6 @@ fn subscribe_once(herdr: &herdr::Client, tx: &Sender<()>) -> Result<Ended, herdr
         }
     }
     Ok(Ended::Closed)
-}
-
-/// `events.jsonl` beside the `watch.yml` that `ank watch --where` names, or
-/// `None` when ank cannot say. The file itself may appear later.
-fn events_jsonl() -> Option<PathBuf> {
-    let output = Command::new("ank")
-        .args(["watch", "--where"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let watch_yml = PathBuf::from(String::from_utf8(output.stdout).ok()?.trim());
-    Some(watch_yml.parent()?.join("events.jsonl"))
 }
 
 /// A trigger for every growth of `path`; a missing file is only waited for.

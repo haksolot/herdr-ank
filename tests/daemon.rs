@@ -130,3 +130,52 @@ fn a_claim_expiry_reads_as_whole_minutes_left_rounded_up() {
     assert_eq!(minutes_until(expiry, unix + 5), Some(0));
     assert_eq!(minutes_until("not a date", unix), None);
 }
+
+/// ank-2's measurement on the daemon of TASK-91a1: the bare `<user>@<host>`
+/// holds a claim while tasks are claimable. Read as `…/herdr-ank`, `context`
+/// stays in orientation mode and says 3; the pane shows the claim and the 3.
+#[test]
+fn a_bare_identity_claim_leaves_the_queue_counted() {
+    use herdr_ank::config::Config;
+    use herdr_ank::herdr::Pane;
+    use herdr_ank::sync::{plan, Corpus};
+
+    let pane: Pane = serde_json::from_value(serde_json::json!({
+        "pane_id": "w1:p2", "workspace_id": "w1", "tab_id": "w1:t1",
+        "cwd": "/src/repo", "name": "ank-2",
+    }))
+    .unwrap();
+    let corpus = Corpus {
+        root: PathBuf::from("/src/repo"),
+        in_progress: serde_json::from_value(serde_json::json!({
+            "contract": 1, "corpus": null, "total": 1, "shown": 1, "hidden": 0,
+            "results": [{
+                "id": "TASK-416cdde27bfb", "kind": "task", "status": "in_progress",
+                "state": "claimed:marie@box", "title": "Sync engine",
+                "created": "2026-09-25T16:54:25Z", "archived": false,
+            }],
+        }))
+        .unwrap(),
+        context: serde_json::from_value(serde_json::json!({
+            "contract": 1, "mode": "orientation", "head": null, "criteria": null,
+            "method": null, "constraints": [], "proposed": [], "specs": [], "tasks": [],
+            "log": [], "ready": 3, "blocked": 0, "finished_elsewhere": 0, "warnings": [],
+        }))
+        .unwrap(),
+        expires_in: Default::default(),
+    };
+    let reports = plan(
+        std::slice::from_ref(&pane),
+        std::slice::from_ref(&pane),
+        &[corpus],
+        &Config::default(),
+    );
+    assert_eq!(reports.len(), 1);
+    let tokens: std::collections::BTreeMap<_, _> = reports[0]
+        .tokens
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    assert_eq!(tokens.get("ank_task"), Some(&"TASK-416c"));
+    assert_eq!(tokens.get("ank_queue"), Some(&"3"));
+}

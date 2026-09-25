@@ -30,7 +30,16 @@ fn fake_bin() -> &'static Path {
     static BIN: OnceLock<PathBuf> = OnceLock::new();
     BIN.get_or_init(|| {
         let bin = scratch("bin").join("ank");
+        // Without ANK_AGENT it is the client's identity probe: it answers a
+        // status for `<dir>/probe-identity` (default `marie@box`) and counts
+        // itself. With it, it records the ANK_AGENT it was handed.
         let script = "#!/bin/sh\nfor last; do :; done\nd=$(dirname \"$last\")\n\
+                      if [ -z \"$ANK_AGENT\" ]; then\n\
+                      echo \"$*\" >> \"$d/probes\"\n\
+                      id=$(cat \"$d/probe-identity\" 2>/dev/null || echo marie@box)\n\
+                      printf '{\"contract\":1,\"corpus\":null,\"branch\":\"main\",\"default_branch\":\"main\",\"identity\":{\"value\":\"%s\",\"source\":\"fallback\"},\"claim\":null,\"drift\":null,\"also_held\":[],\"remote\":false,\"refs\":null,\"elsewhere\":[],\"constraints\":0,\"queue\":0,\"unmerged\":0,\"faults\":0,\"signals\":0}' \"$id\"\n\
+                      exit 0\nfi\n\
+                      printf '%s\\n' \"$ANK_AGENT\" > \"$d/agent\"\n\
                       printf '%s\\n' \"$@\" > \"$d/argv\"\ncat \"$d/stdout\"\n\
                       cat \"$d/stderr\" >&2\nexit $(cat \"$d/code\")\n";
         let mut file = fs::File::create(&bin).unwrap();
@@ -267,4 +276,110 @@ fn the_tui_command_runs_in_the_corpus_without_repo_and_keeps_the_users_identity(
     assert_eq!(command.get_current_dir(), Some(Path::new("/src/repo")));
     // Nothing set or removed: the TUI is the human's, under the human's ANK_AGENT.
     assert_eq!(command.get_envs().count(), 0);
+}
+
+fn read(dir: &Path, name: &str) -> String {
+    fs::read_to_string(dir.join(name)).unwrap_or_default()
+}
+
+#[test]
+fn every_verb_runs_as_the_plugin_identity_built_on_the_fallback_ank_computes() {
+    let dir = scratch("identity");
+    fs::write(dir.join("probe-identity"), "jo@host").unwrap();
+    let client = fake_ank(&dir, &fixture("status"), "", 0);
+    client.status().unwrap();
+    assert_eq!(read(&dir, "agent"), "jo@host/herdr-ank\n");
+    fs::write(dir.join("stdout"), fixture("find")).unwrap();
+    client.find(&["--status", "in_progress"]).unwrap();
+    assert_eq!(read(&dir, "agent"), "jo@host/herdr-ank\n");
+    fs::write(dir.join("stdout"), fixture("context")).unwrap();
+    client.context(None).unwrap();
+    assert_eq!(read(&dir, "agent"), "jo@host/herdr-ank\n");
+    // Asked once per client, with ANK_AGENT removed, on the same corpus.
+    let repo = dir.join("repo");
+    assert_eq!(
+        read(&dir, "probes"),
+        format!("status --json --repo {}\n", repo.display())
+    );
+}
+
+#[test]
+fn a_probe_that_answers_a_suffixed_identity_keeps_only_user_at_host() {
+    let dir = scratch("identity-suffixed");
+    fs::write(dir.join("probe-identity"), "jo@host/somebody").unwrap();
+    let client = fake_ank(&dir, &fixture("status"), "", 0);
+    client.status().unwrap();
+    assert_eq!(read(&dir, "agent"), "jo@host/herdr-ank\n");
+}
+
+#[test]
+fn the_built_command_carries_the_plugin_identity() {
+    let dir = scratch("built");
+    let client = fake_ank(&dir, "", "", 0);
+    let command = client.command("find", &["--status", "open"]).unwrap();
+    let envs: Vec<_> = command.get_envs().collect();
+    assert!(
+        envs.contains(&(
+            std::ffi::OsStr::new("ANK_AGENT"),
+            Some(std::ffi::OsStr::new("marie@box/herdr-ank"))
+        )),
+        "{envs:?}"
+    );
+    assert_eq!(herdr_ank::ank::PLUGIN_AGENT, "herdr-ank");
+}
+
+#[test]
+fn watch_where_names_events_jsonl_beside_watch_yml_without_repo() {
+    let dir = scratch("watch");
+    let bin = dir.join("ank");
+    let mut file = fs::File::create(&bin).unwrap();
+    write!(
+        file,
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{d}/argv'\necho /home/me/.config/ank/watch.yml\n",
+        d = dir.display()
+    )
+    .unwrap();
+    file.sync_all().unwrap();
+    drop(file);
+    fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+    let mut events = None;
+    for _ in 0..500 {
+        match herdr_ank::ank::events_jsonl(&bin) {
+            Err(e) if e.to_string().contains("busy") => {
+                std::thread::sleep(std::time::Duration::from_millis(2))
+            }
+            other => {
+                events = Some(other);
+                break;
+            }
+        }
+    }
+    assert_eq!(
+        events.unwrap().unwrap(),
+        Path::new("/home/me/.config/ank/events.jsonl")
+    );
+    assert_eq!(argv(&dir), ["watch", "--where"]);
+}
+
+#[test]
+fn nothing_outside_the_ank_module_spawns_ank() {
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut offenders = Vec::new();
+    let mut stack = vec![src.clone()];
+    while let Some(dir) = stack.pop() {
+        for entry in fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                if path != src.join("ank") {
+                    stack.push(path);
+                }
+            } else if fs::read_to_string(&path)
+                .unwrap()
+                .contains("Command::new(\"ank\")")
+            {
+                offenders.push(path);
+            }
+        }
+    }
+    assert!(offenders.is_empty(), "{offenders:?}");
 }
