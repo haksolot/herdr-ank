@@ -19,7 +19,7 @@ criteria_by: creator
 verify: [cargo-test, clippy, fmt-check]
 method: tdd
 schema: 4
-version: 1
+version: 3
 ---
 
 Applique ADR-599b6f424271. Le contrat d'install.sh est la référence, jusqu'aux
