@@ -1,6 +1,10 @@
 //! `install.sh`, the manifest's `[[build]]`, run against a `file://` release
 //! in a tempdir and under a PATH built for the test: the tools the script needs,
 //! and `cargo` only when a case asks for it.
+//!
+//! install.sh is POSIX sh, so these tests run where it runs (ADR-599b6f424271).
+
+#![cfg(unix)]
 
 use std::fs;
 use std::os::unix::fs::{symlink, PermissionsExt};

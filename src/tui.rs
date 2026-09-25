@@ -1,9 +1,10 @@
 //! `herdr-ank tui`: find the corpus of the workspace herdr opened the pane
-//! from, then become `ank tui` with it as cwd.
+//! from, then become `ank tui` with it as cwd: by exec on Unix, as a child
+//! waited on and exited as on Windows, which has no exec (ADR-599b6f424271).
 
-use std::os::unix::process::CommandExt;
+use std::io;
 use std::path::{Path, PathBuf};
-use std::process::ExitCode;
+use std::process::{Command, ExitCode};
 
 use serde::Deserialize;
 
@@ -39,8 +40,8 @@ pub fn find_corpus(start: &Path) -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
-/// Replaces this process with `ank tui` run in the corpus. Returns only on
-/// failure, after saying why on stderr, so herdr closes the pane at once.
+/// Hands the pane to `ank tui` run in the corpus. Returns ank's exit code, or
+/// 1 after saying on stderr why it could not run, so herdr closes the pane.
 pub fn run() -> ExitCode {
     let context = std::env::var("HERDR_PLUGIN_CONTEXT_JSON").unwrap_or_default();
     let Some(start) = start_dir(&context) else {
@@ -53,12 +54,34 @@ pub fn run() -> ExitCode {
         eprintln!("{}", not_found(&start));
         return ExitCode::from(1);
     };
-    let err = crate::ank::tui_command(&repo).exec();
+    let err = match hand_over(crate::ank::tui_command(&repo)) {
+        Ok(code) => return code,
+        Err(err) => err,
+    };
     eprintln!(
         "herdr-ank tui: cannot run `ank tui` in {}: {err}",
         repo.display()
     );
     ExitCode::from(1)
+}
+
+/// Replaces this process with `command`; returns only on failure.
+#[cfg(unix)]
+fn hand_over(mut command: Command) -> io::Result<ExitCode> {
+    use std::os::unix::process::CommandExt;
+    Err(command.exec())
+}
+
+/// Runs `command` as a child with this console, and exits as it did.
+#[cfg(windows)]
+fn hand_over(mut command: Command) -> io::Result<ExitCode> {
+    let status = command.status()?;
+    // A code beyond a byte, or none, is a failure all the same.
+    let code = status
+        .code()
+        .and_then(|c| u8::try_from(c).ok())
+        .unwrap_or(1);
+    Ok(ExitCode::from(code))
 }
 
 fn not_found(start: &Path) -> String {

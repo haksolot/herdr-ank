@@ -3,6 +3,13 @@ name = "herdr-ank"
 version = "0.1.0"
 edition = "2021"
 description = "herdr plugin integrating the ank task and decision corpus"
+default-run = "herdr-ank"
+
+# A stand-in for herdr and ank in the integration tests (tests/support).
+[[bin]]
+name = "fake-cli"
+path = "tests/support/fake_cli.rs"
+test = false
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }

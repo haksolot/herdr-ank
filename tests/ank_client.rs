@@ -1,11 +1,11 @@
 use std::fs;
-use std::io::Write;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 
 use herdr_ank::ank::{AnkError, Client, ExitKind};
+
+mod support;
 
 const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/ank");
 
@@ -22,51 +22,58 @@ fn scratch(name: &str) -> PathBuf {
     dir
 }
 
-/// The fake `ank`: records its argv, prints `stdout` and `stderr`, and exits with the
-/// code in `code`, all read from the parent of the `--repo` it is handed. It is
-/// written once, before any test spawns it: writing an executable while another
-/// thread forks makes its exec fail with ETXTBSY.
+/// The fake `ank` (tests/support/fake_cli.rs), linked once and shared: its
+/// home is the parent of the `--repo` it is handed, where each test writes its
+/// answers and reads its calls.
 fn fake_bin() -> &'static Path {
     static BIN: OnceLock<PathBuf> = OnceLock::new();
     BIN.get_or_init(|| {
-        let bin = scratch("bin").join("ank");
-        // Without ANK_AGENT it is the client's identity probe: it answers a
-        // status for `<dir>/probe-identity` (default `marie@box`) and counts
-        // itself. With it, it records the ANK_AGENT it was handed.
-        let script = "#!/bin/sh\nfor last; do :; done\nd=$(dirname \"$last\")\n\
-                      if [ -z \"$ANK_AGENT\" ]; then\n\
-                      echo \"$*\" >> \"$d/probes\"\n\
-                      id=$(cat \"$d/probe-identity\" 2>/dev/null || echo marie@box)\n\
-                      printf '{\"contract\":1,\"corpus\":null,\"branch\":\"main\",\"default_branch\":\"main\",\"identity\":{\"value\":\"%s\",\"source\":\"fallback\"},\"claim\":null,\"drift\":null,\"also_held\":[],\"remote\":false,\"refs\":null,\"elsewhere\":[],\"constraints\":0,\"queue\":0,\"unmerged\":0,\"faults\":0,\"signals\":0}' \"$id\"\n\
-                      exit 0\nfi\n\
-                      printf '%s\\n' \"$ANK_AGENT\" > \"$d/agent\"\n\
-                      printf '%s\\n' \"$@\" > \"$d/argv\"\ncat \"$d/stdout\"\n\
-                      cat \"$d/stderr\" >&2\nexit $(cat \"$d/code\")\n";
-        let mut file = fs::File::create(&bin).unwrap();
-        file.write_all(script.as_bytes()).unwrap();
-        file.sync_all().unwrap();
-        drop(file);
-        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
-        bin
+        let dir = scratch("bin");
+        support::home_from_last_arg(&dir);
+        support::link(&dir, "ank")
     })
 }
 
+/// Without ANK_AGENT the fake is the client's identity probe, answering a
+/// status for `identity`; with it, it answers `stdout`, `stderr` and `code`.
+fn answer_as(dir: &Path, identity: &str, stdout: &str, stderr: &str, code: u8) {
+    let probe = format!(
+        r#"{{"contract":1,"corpus":null,"branch":"main","default_branch":"main","identity":{{"value":"{identity}","source":"fallback"}},"claim":null,"drift":null,"also_held":[],"remote":false,"refs":null,"elsewhere":[],"constraints":0,"queue":0,"unmerged":0,"faults":0,"signals":0}}"#
+    );
+    let mut probe = support::answer(&[], &probe, "", 0);
+    probe["agent"] = false.into();
+    support::write_answers(dir, &[probe, support::answer(&[], stdout, stderr, code)]);
+}
+
 /// A client over `dir/repo` whose fake `ank` answers with `stdout`, `stderr` and `code`.
-fn fake_ank(dir: &Path, stdout: &str, stderr: &str, code: i32) -> Client {
-    fs::write(dir.join("stdout"), stdout).unwrap();
-    fs::write(dir.join("stderr"), stderr).unwrap();
-    fs::write(dir.join("code"), code.to_string()).unwrap();
+fn fake_ank(dir: &Path, stdout: &str, stderr: &str, code: u8) -> Client {
+    answer_as(dir, "marie@box", stdout, stderr, code);
     let repo = dir.join("repo");
     fs::create_dir_all(&repo).unwrap();
     Client::with_program(fake_bin(), &repo)
 }
 
-fn argv(dir: &Path) -> Vec<String> {
-    fs::read_to_string(dir.join("argv"))
-        .unwrap()
-        .lines()
-        .map(str::to_owned)
+/// The calls made as the plugin identity, not as the probe.
+fn verb_calls(dir: &Path) -> Vec<support::Call> {
+    support::calls(dir)
+        .into_iter()
+        .filter(|call| call.ank_agent.is_some())
         .collect()
+}
+
+fn argv(dir: &Path) -> Vec<String> {
+    verb_calls(dir)
+        .pop()
+        .expect("the fake ank was never run")
+        .argv
+}
+
+/// The ANK_AGENT the last verb ran under.
+fn agent(dir: &Path) -> String {
+    verb_calls(dir)
+        .pop()
+        .and_then(|c| c.ank_agent)
+        .unwrap_or_default()
 }
 
 fn fixture(verb: &str) -> String {
@@ -229,7 +236,7 @@ fn every_exit_code_is_routed_with_its_stderr() {
                 kind: got_kind,
                 stderr: got_stderr,
             }) => {
-                assert_eq!(got, code as u8);
+                assert_eq!(got, code);
                 assert_eq!(got_kind, kind);
                 assert_eq!(got_stderr, stderr);
             }
@@ -278,38 +285,39 @@ fn the_tui_command_runs_in_the_corpus_without_repo_and_keeps_the_users_identity(
     assert_eq!(command.get_envs().count(), 0);
 }
 
-fn read(dir: &Path, name: &str) -> String {
-    fs::read_to_string(dir.join(name)).unwrap_or_default()
-}
-
 #[test]
 fn every_verb_runs_as_the_plugin_identity_built_on_the_fallback_ank_computes() {
     let dir = scratch("identity");
-    fs::write(dir.join("probe-identity"), "jo@host").unwrap();
-    let client = fake_ank(&dir, &fixture("status"), "", 0);
+    let client = fake_ank(&dir, "", "", 0);
+    answer_as(&dir, "jo@host", &fixture("status"), "", 0);
     client.status().unwrap();
-    assert_eq!(read(&dir, "agent"), "jo@host/herdr-ank\n");
-    fs::write(dir.join("stdout"), fixture("find")).unwrap();
+    assert_eq!(agent(&dir), "jo@host/herdr-ank");
+    answer_as(&dir, "jo@host", &fixture("find"), "", 0);
     client.find(&["--status", "in_progress"]).unwrap();
-    assert_eq!(read(&dir, "agent"), "jo@host/herdr-ank\n");
-    fs::write(dir.join("stdout"), fixture("context")).unwrap();
+    assert_eq!(agent(&dir), "jo@host/herdr-ank");
+    answer_as(&dir, "jo@host", &fixture("context"), "", 0);
     client.context(None).unwrap();
-    assert_eq!(read(&dir, "agent"), "jo@host/herdr-ank\n");
+    assert_eq!(agent(&dir), "jo@host/herdr-ank");
     // Asked once per client, with ANK_AGENT removed, on the same corpus.
     let repo = dir.join("repo");
+    let probes: Vec<Vec<String>> = support::calls(&dir)
+        .into_iter()
+        .filter(|call| call.ank_agent.is_none())
+        .map(|call| call.argv)
+        .collect();
     assert_eq!(
-        read(&dir, "probes"),
-        format!("status --json --repo {}\n", repo.display())
+        probes,
+        [["status", "--json", "--repo", repo.to_str().unwrap()]]
     );
 }
 
 #[test]
 fn a_probe_that_answers_a_suffixed_identity_keeps_only_user_at_host() {
     let dir = scratch("identity-suffixed");
-    fs::write(dir.join("probe-identity"), "jo@host/somebody").unwrap();
-    let client = fake_ank(&dir, &fixture("status"), "", 0);
+    let client = fake_ank(&dir, "", "", 0);
+    answer_as(&dir, "jo@host/somebody", &fixture("status"), "", 0);
     client.status().unwrap();
-    assert_eq!(read(&dir, "agent"), "jo@host/herdr-ank\n");
+    assert_eq!(agent(&dir), "jo@host/herdr-ank");
 }
 
 #[test]
@@ -331,34 +339,25 @@ fn the_built_command_carries_the_plugin_identity() {
 #[test]
 fn watch_where_names_events_jsonl_beside_watch_yml_without_repo() {
     let dir = scratch("watch");
-    let bin = dir.join("ank");
-    let mut file = fs::File::create(&bin).unwrap();
-    write!(
-        file,
-        "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{d}/argv'\necho /home/me/.config/ank/watch.yml\n",
-        d = dir.display()
-    )
-    .unwrap();
-    file.sync_all().unwrap();
-    drop(file);
-    fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
-    let mut events = None;
-    for _ in 0..500 {
-        match herdr_ank::ank::events_jsonl(&bin) {
-            Err(e) if e.to_string().contains("busy") => {
-                std::thread::sleep(std::time::Duration::from_millis(2))
-            }
-            other => {
-                events = Some(other);
-                break;
-            }
-        }
-    }
+    let bin = support::link(&dir, "ank");
+    support::write_answers(
+        &dir,
+        &[support::answer(
+            &["watch", "--where"],
+            "/home/me/.config/ank/watch.yml\n",
+            "",
+            0,
+        )],
+    );
+    let events = herdr_ank::ank::events_jsonl(&bin);
     assert_eq!(
-        events.unwrap().unwrap(),
+        events.unwrap(),
         Path::new("/home/me/.config/ank/events.jsonl")
     );
-    assert_eq!(argv(&dir), ["watch", "--where"]);
+    assert_eq!(
+        support::calls(&dir).pop().unwrap().argv,
+        ["watch", "--where"]
+    );
 }
 
 #[test]

@@ -1,5 +1,5 @@
 //! The herdr boundary (ADR-357c017baf9b): every action is an argv handed to a
-//! fake `herdr` that records it, and the event stream is a fixed NDJSON file,
+//! fake `herdr` (tests/support) that records it, and the event stream is a fixed NDJSON file,
 //! replayed through an in-memory stream on every OS and served over a real
 //! Unix socket on Unix (ADR-599b6f424271).
 
@@ -8,8 +8,6 @@ use std::fs;
 #[cfg(unix)]
 use std::io::{BufRead, BufReader};
 use std::io::{Cursor, Read, Write};
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 #[cfg(unix)]
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
@@ -20,15 +18,17 @@ use std::thread;
 #[cfg(unix)]
 use std::time::{Duration, Instant};
 
-use herdr_ank::herdr::{subscribe_over, Client, Event, HerdrError, Subscription};
-#[cfg(unix)]
-use herdr_ank::herdr::{Sound, TabCreate, WorktreeCreate};
+use herdr_ank::herdr::{
+    subscribe_over, Client, Event, HerdrError, Sound, Subscription, TabCreate, WorktreeCreate,
+};
+
+mod support;
 
 static NEXT_DIR: AtomicUsize = AtomicUsize::new(0);
 
 fn tempdir(name: &str) -> PathBuf {
     let n = NEXT_DIR.fetch_add(1, Ordering::SeqCst);
-    let dir = std::env::temp_dir().join(format!(
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
         "herdr-ank-test-{}-{}-{}",
         std::process::id(),
         name,
@@ -45,50 +45,26 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
-// The fake is a sh script until the tests get a portable helper binary.
-#[cfg(unix)]
-/// A fake `herdr`: writes its argv, NUL-separated, then answers like the real
-/// binary does, `stdout` and exit 0 or `stderr` and exit 1.
+/// A fake `herdr` (tests/support/fake_cli.rs): records its argv, then answers
+/// like the real binary does, `stdout` and exit 0 or `stderr` and exit 1.
 struct FakeHerdr {
     dir: PathBuf,
     bin: PathBuf,
 }
 
-#[cfg(unix)]
 impl FakeHerdr {
     fn answering(name: &str, response: &str) -> Self {
-        Self::build(name, response, 0)
+        Self::build(name, support::answer(&[], response, "", 0))
     }
 
     fn failing(name: &str, response: &str) -> Self {
-        Self::build(name, response, 1)
+        Self::build(name, support::answer(&[], "", response, 1))
     }
 
-    fn build(name: &str, response: &str, exit: i32) -> Self {
+    fn build(name: &str, answer: serde_json::Value) -> Self {
         let dir = tempdir(name);
-        let bin = dir.join("herdr");
-        let response_file = dir.join("response.json");
-        fs::write(&response_file, response).unwrap();
-        let stream = if exit == 0 { "" } else { " >&2" };
-        let script = format!(
-            "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\0' \"$a\"; done > '{argv}'\ncat '{resp}'{stream}\nexit {exit}\n",
-            argv = dir.join("argv").display(),
-            resp = response_file.display(),
-        );
-        fs::write(&bin, script).unwrap();
-        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
-        // A child forked by a parallel test between our open and its exec holds
-        // the script's write descriptor for a moment, and exec fails with
-        // ETXTBSY until it lets go. Wait that out here, not in the client.
-        for _ in 0..500 {
-            match std::process::Command::new(&bin).output() {
-                Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy => {
-                    thread::sleep(Duration::from_millis(2))
-                }
-                _ => break,
-            }
-        }
-        let _ = fs::remove_file(dir.join("argv"));
+        let bin = support::link(&dir, "herdr");
+        support::write_answers(&dir, &[answer]);
         FakeHerdr { dir, bin }
     }
 
@@ -97,18 +73,15 @@ impl FakeHerdr {
     }
 
     fn argv(&self) -> Vec<String> {
-        let raw = fs::read(self.dir.join("argv")).expect("the fake herdr was never run");
-        raw.split(|b| *b == 0)
-            .filter(|s| !s.is_empty())
-            .map(|s| String::from_utf8(s.to_vec()).unwrap())
-            .collect()
+        support::calls(&self.dir)
+            .pop()
+            .expect("the fake herdr was never run")
+            .argv
     }
 }
 
-#[cfg(unix)]
 const PANE: &str = r#"{"pane_id":"w1:p2","workspace_id":"w1","tab_id":"w1:t1","agent":"claude","agent_status":"working","cwd":"/src/repo","focused":false,"revision":3,"tokens":{"ank":"TASK-de0a"},"a_field_herdr_added_later":true}"#;
 
-#[cfg(unix)]
 #[test]
 fn from_env_reads_bin_and_socket_and_names_what_is_missing() {
     // The only test touching these variables, so no other test races it.
@@ -131,7 +104,6 @@ fn from_env_reads_bin_and_socket_and_names_what_is_missing() {
     assert_eq!(fake.argv(), ["agent", "list"]);
 }
 
-#[cfg(unix)]
 #[test]
 fn pane_list_passes_the_workspace_and_decodes_panes() {
     let fake = FakeHerdr::answering(
@@ -151,7 +123,6 @@ fn pane_list_passes_the_workspace_and_decodes_panes() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn pane_list_without_workspace_passes_no_flag() {
     let fake = FakeHerdr::answering(
@@ -162,7 +133,6 @@ fn pane_list_without_workspace_passes_no_flag() {
     assert_eq!(fake.argv(), ["pane", "list"]);
 }
 
-#[cfg(unix)]
 #[test]
 fn agent_list_decodes_agents() {
     let fake = FakeHerdr::answering(
@@ -174,7 +144,6 @@ fn agent_list_decodes_agents() {
     assert_eq!(agents[0].pane_id, "w1:p2");
 }
 
-#[cfg(unix)]
 #[test]
 fn report_metadata_sets_and_clears_tokens_under_the_plugin_source() {
     let fake = FakeHerdr::answering(
@@ -209,7 +178,6 @@ fn report_metadata_sets_and_clears_tokens_under_the_plugin_source() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn report_metadata_without_ttl_passes_no_ttl() {
     let fake = FakeHerdr::answering(
@@ -233,7 +201,6 @@ fn report_metadata_without_ttl_passes_no_ttl() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn notification_show_passes_title_body_and_sound() {
     let fake = FakeHerdr::answering(
@@ -261,7 +228,6 @@ fn notification_show_passes_title_body_and_sound() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn worktree_create_passes_every_flag_and_returns_the_root_pane() {
     let fake = FakeHerdr::answering(
@@ -302,7 +268,6 @@ fn worktree_create_passes_every_flag_and_returns_the_root_pane() {
     assert_eq!(root.pane_id, "w1:p2");
 }
 
-#[cfg(unix)]
 #[test]
 fn tab_create_passes_cwd_env_label_and_focus() {
     let fake = FakeHerdr::answering(
@@ -340,7 +305,6 @@ fn tab_create_passes_cwd_env_label_and_focus() {
     assert_eq!(root.tab_id, "w1:t1");
 }
 
-#[cfg(unix)]
 #[test]
 fn agent_start_names_kind_and_pane() {
     let fake = FakeHerdr::answering(
@@ -360,7 +324,6 @@ fn agent_start_names_kind_and_pane() {
     assert_eq!(agent.pane_id, "w1:p2");
 }
 
-#[cfg(unix)]
 #[test]
 fn agent_start_passes_agent_args_after_a_double_dash() {
     let fake = FakeHerdr::answering(
@@ -386,7 +349,6 @@ fn agent_start_passes_agent_args_after_a_double_dash() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn agent_prompt_passes_the_text_as_one_argument_untouched_by_a_shell() {
     let fake = FakeHerdr::answering(
@@ -400,7 +362,6 @@ fn agent_prompt_passes_the_text_as_one_argument_untouched_by_a_shell() {
     assert_eq!(fake.argv(), ["agent", "prompt", "ank-2", text]);
 }
 
-#[cfg(unix)]
 #[test]
 fn a_cli_error_is_a_herdr_error_carrying_code_and_message() {
     let fake = FakeHerdr::failing(
@@ -419,7 +380,6 @@ fn a_cli_error_is_a_herdr_error_carrying_code_and_message() {
     }
 }
 
-#[cfg(unix)]
 #[test]
 fn a_cli_failure_without_json_is_a_herdr_error_not_a_panic() {
     let fake = FakeHerdr::failing("cli-garbage", "usage: herdr agent list\n");
@@ -483,7 +443,9 @@ fn replay(
 #[cfg(unix)]
 fn serve(name: &str, fixture_name: &str) -> (Client, thread::JoinHandle<String>) {
     let dir = tempdir(name);
-    let socket = dir.join("herdr.sock");
+    // A socket path must fit sun_path, which the target directory may not.
+    let socket = std::env::temp_dir().join(format!("herdr-ank-{}-{name}.sock", std::process::id()));
+    let _ = fs::remove_file(&socket);
     let listener = UnixListener::bind(&socket).unwrap();
     listener.set_nonblocking(true).unwrap();
     let body = fs::read(fixture(fixture_name)).unwrap();
@@ -626,7 +588,6 @@ fn subscribe_to_an_absent_socket_is_a_herdr_error() {
     ));
 }
 
-#[cfg(unix)]
 #[test]
 fn plugin_pane_open_names_the_entrypoint_and_returns_the_opened_pane() {
     let fake = FakeHerdr::answering(
@@ -662,7 +623,6 @@ fn plugin_pane_open_names_the_entrypoint_and_returns_the_opened_pane() {
     assert_eq!(opened.pane.pane_id, "w1:p2");
 }
 
-#[cfg(unix)]
 #[test]
 fn plugin_pane_open_without_workspace_or_env_passes_neither() {
     let fake = FakeHerdr::answering(
@@ -687,7 +647,6 @@ fn plugin_pane_open_without_workspace_or_env_passes_neither() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn plugin_pane_open_refused_is_an_api_error() {
     // As herdr 0.9.1 answers an unknown entrypoint: the body on stderr, exit 1.
@@ -739,7 +698,6 @@ fn subscribe_decodes_the_lifecycle_events_the_daemon_wakes_on() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn a_verb_whose_result_is_not_read_succeeds_on_an_empty_stdout() {
     // herdr 0.9.1 `pane report-metadata` exits 0 and writes nothing.
@@ -757,7 +715,6 @@ fn a_verb_whose_result_is_not_read_succeeds_on_an_empty_stdout() {
         .expect("an empty stdout with exit 0 is a success");
 }
 
-#[cfg(unix)]
 #[test]
 fn a_verb_whose_result_is_read_still_fails_on_an_empty_stdout() {
     let fake = FakeHerdr::answering("empty-list", "");

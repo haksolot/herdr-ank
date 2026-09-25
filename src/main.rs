@@ -59,6 +59,12 @@ fn main() -> ExitCode {
     }
 }
 
+/// The variable naming the user's home, under which worktrees go.
+#[cfg(unix)]
+const HOME: &str = "HOME";
+#[cfg(windows)]
+const HOME: &str = "USERPROFILE";
+
 fn env_path(var: &str) -> Result<PathBuf, String> {
     match std::env::var_os(var) {
         Some(value) if !value.is_empty() => Ok(value.into()),
@@ -79,7 +85,7 @@ fn run_work() -> Result<(), String> {
         ank_program: "ank".into(),
         context_json: std::env::var("HERDR_PLUGIN_CONTEXT_JSON").unwrap_or_default(),
         state_dir: env_path("HERDR_PLUGIN_STATE_DIR")?,
-        worktrees_root: env_path("HOME")?.join(".herdr/worktrees"),
+        worktrees_root: env_path(HOME)?.join(".herdr").join("worktrees"),
         config,
         poll: Duration::from_millis(250),
         pick_timeout: Duration::from_secs(600),

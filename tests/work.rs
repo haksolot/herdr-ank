@@ -3,12 +3,9 @@
 //! documents the test writes.
 
 use std::fs;
-use std::io::Write;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
-use std::thread;
 use std::time::Duration;
 
 use herdr_ank::ank::ContextTask;
@@ -16,6 +13,8 @@ use herdr_ank::config::Config;
 use herdr_ank::herdr;
 use herdr_ank::pick;
 use herdr_ank::work::{self, Outcome, Work, WorkError};
+
+mod support;
 
 fn scratch(name: &str) -> PathBuf {
     static N: AtomicUsize = AtomicUsize::new(0);
@@ -29,80 +28,89 @@ fn scratch(name: &str) -> PathBuf {
     dir
 }
 
-fn write_executable(path: &Path, script: &str) {
-    let mut file = fs::File::create(path).unwrap();
-    file.write_all(script.as_bytes()).unwrap();
-    file.sync_all().unwrap();
-    drop(file);
-    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
-    // A child forked by a parallel test between our open and its exec holds the
-    // write descriptor for a moment: wait out ETXTBSY here, not in the code.
-    for _ in 0..500 {
-        match std::process::Command::new(path).arg("--probe").output() {
-            Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy => {
-                thread::sleep(Duration::from_millis(2))
-            }
-            _ => break,
-        }
-    }
-}
-
-/// The fake `ank`, shared: it answers `ank <verb> ... --repo <dir>/repo` with
-/// `<dir>/ank-<verb>.json`, or exits with `<dir>/ank-<verb>.code` when present.
+/// The fake `ank` (tests/support/fake_cli.rs), shared: its home is the parent
+/// of the `--repo <dir>/repo` it is handed, and `setup` writes its answers
+/// there, one per verb.
 fn fake_ank() -> &'static Path {
     static BIN: OnceLock<PathBuf> = OnceLock::new();
     BIN.get_or_init(|| {
-        let bin = scratch("ank-bin").join("ank");
-        write_executable(
-            &bin,
-            "#!/bin/sh\n[ \"$1\" = --probe ] && exit 0\nfor last; do :; done\n\
-             d=$(dirname \"$last\")\nif [ -f \"$d/ank-$1.code\" ]; then exit $(cat \"$d/ank-$1.code\"); fi\n\
-             cat \"$d/ank-$1.json\"\n",
-        );
-        bin
+        let dir = scratch("ank-bin");
+        support::home_from_last_arg(&dir);
+        support::link(&dir, "ank")
     })
 }
 
 const PANE: &str = r#"{"pane_id":"PANE","workspace_id":"w1","tab_id":"w1:t9","agent_status":"unknown","focused":true,"revision":1}"#;
 
-/// A fake `herdr` for one test: appends each call's argv, one line with the
-/// arguments separated by `|`, to `<dir>/calls`, answers each verb as herdr
-/// 0.9.1 does, and on `plugin pane open` plays the picker by writing `pick`
+/// Where the fake `herdr` of a test lives and records its calls, apart from
+/// the fake `ank`'s home.
+fn herdr_home(dir: &Path) -> PathBuf {
+    dir.join("herdr-home")
+}
+
+/// A fake `herdr` for one test: records each call, answers each verb as herdr
+/// 0.9.1 does, and on `plugin pane open` plays the picker by copying `pick`
 /// (the chosen id, or nothing for a cancel) into the state directory.
 fn fake_herdr(dir: &Path, state: &Path, pick: &str) -> herdr::Client {
-    fs::write(dir.join("pick"), pick).unwrap();
-    let bin = dir.join("herdr");
+    let home = herdr_home(dir);
+    fs::create_dir_all(&home).unwrap();
+    fs::write(home.join("pick"), pick).unwrap();
+    let bin = support::link(&home, "herdr");
     let pane = |id: &str| PANE.replace("PANE", id);
-    let script = format!(
-        r#"#!/bin/sh
-[ "$1" = --probe ] && exit 0
-line=""; for a in "$@"; do line="$line|$a"; done
-echo "${{line#|}}" >> '{d}/calls'
-case "$1 $2" in
-  "plugin pane") cp '{d}/pick' '{s}/pick'
-    echo '{{"id":"cli:plugin","result":{{"type":"plugin_pane_opened","plugin_pane":{{"plugin_id":"ank","entrypoint":"pick","pane":{picker}}}}}}}' ;;
-  "worktree create") echo '{{"id":"cli","result":{{"type":"worktree_created","root_pane":{wt}}}}}' ;;
-  "tab create") echo '{{"id":"cli","result":{{"type":"tab_created","root_pane":{tab}}}}}' ;;
-  "agent start") echo '{{"id":"cli","result":{{"type":"agent_started","agent":{tab},"argv":[]}}}}' ;;
-  "agent prompt") echo '{{"id":"cli","result":{{"type":"agent_prompted","agent":{tab}}}}}' ;;
-  *) echo '{{"id":"cli","result":{{"type":"ok"}}}}' ;;
-esac
-"#,
-        d = dir.display(),
-        s = state.display(),
-        picker = pane("w1:p-pick"),
-        wt = pane("w1:p-wt"),
-        tab = pane("w1:p-tab"),
+    let mut picked = support::answer(
+        &["plugin", "pane"],
+        &format!(
+            r#"{{"id":"cli:plugin","result":{{"type":"plugin_pane_opened","plugin_pane":{{"plugin_id":"ank","entrypoint":"pick","pane":{}}}}}}}"#,
+            pane("w1:p-pick")
+        ),
+        "",
+        0,
     );
-    write_executable(&bin, &script);
+    picked["copy"] = serde_json::json!([home.join("pick"), state.join("pick")]);
+    let answer = |args: &[&str], result: String| support::answer(args, &result, "", 0);
+    support::write_answers(
+        &home,
+        &[
+            picked,
+            answer(
+                &["worktree", "create"],
+                format!(
+                    r#"{{"id":"cli","result":{{"type":"worktree_created","root_pane":{}}}}}"#,
+                    pane("w1:p-wt")
+                ),
+            ),
+            answer(
+                &["tab", "create"],
+                format!(
+                    r#"{{"id":"cli","result":{{"type":"tab_created","root_pane":{}}}}}"#,
+                    pane("w1:p-tab")
+                ),
+            ),
+            answer(
+                &["agent", "start"],
+                format!(
+                    r#"{{"id":"cli","result":{{"type":"agent_started","agent":{},"argv":[]}}}}"#,
+                    pane("w1:p-tab")
+                ),
+            ),
+            answer(
+                &["agent", "prompt"],
+                format!(
+                    r#"{{"id":"cli","result":{{"type":"agent_prompted","agent":{}}}}}"#,
+                    pane("w1:p-tab")
+                ),
+            ),
+            answer(&[], r#"{"id":"cli","result":{"type":"ok"}}"#.into()),
+        ],
+    );
     herdr::Client::new(bin, dir.join("herdr.sock"))
 }
 
+/// Each herdr call, its arguments joined by `|`.
 fn calls(dir: &Path) -> Vec<String> {
-    fs::read_to_string(dir.join("calls"))
-        .unwrap_or_default()
-        .lines()
-        .map(str::to_owned)
+    support::calls(&herdr_home(dir))
+        .into_iter()
+        .map(|call| call.argv.join("|"))
         .collect()
 }
 
@@ -132,16 +140,25 @@ fn setup(name: &str, pick: &str, status: &str, find: &str) -> Setup {
     let corpus = dir.join("repo");
     fs::create_dir_all(corpus.join(".ank")).unwrap();
     fs::create_dir_all(corpus.join("src/deep")).unwrap();
-    fs::write(dir.join("ank-status.json"), status).unwrap();
-    fs::write(dir.join("ank-context.json"), CONTEXT).unwrap();
-    fs::write(dir.join("ank-find.json"), find).unwrap();
+    support::write_answers(
+        &dir,
+        &[
+            support::answer(&["status"], status, "", 0),
+            support::answer(&["context"], CONTEXT, "", 0),
+            support::answer(&["find"], find, "", 0),
+        ],
+    );
     let state = dir.join("state");
     fs::create_dir_all(&state).unwrap();
     let herdr = fake_herdr(&dir, &state, pick);
-    let context = format!(
-        r#"{{"workspace_id":"w1","workspace_cwd":"{}","focused_pane_id":"w1:p1","invocation_source":"command_palette","a_field_herdr_added_later":1}}"#,
-        corpus.join("src/deep").display()
-    );
+    let context = serde_json::json!({
+        "workspace_id": "w1",
+        "workspace_cwd": corpus.join("src/deep"),
+        "focused_pane_id": "w1:p1",
+        "invocation_source": "command_palette",
+        "a_field_herdr_added_later": 1,
+    })
+    .to_string();
     let work = Work {
         herdr,
         ank_program: fake_ank().to_path_buf(),
@@ -292,10 +309,8 @@ fn a_workspace_without_a_corpus_is_refused_before_any_herdr_call() {
         "a .ank/ above the temp dir"
     );
     fs::create_dir_all(&bare).unwrap();
-    work.context_json = format!(
-        r#"{{"workspace_id":"w1","workspace_cwd":"{}"}}"#,
-        bare.display()
-    );
+    work.context_json =
+        serde_json::json!({"workspace_id": "w1", "workspace_cwd": bare}).to_string();
     match work::run(&work) {
         Err(err @ WorkError::NoCorpus { .. }) => {
             let message = err.to_string();
