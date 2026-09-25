@@ -25,3 +25,6 @@ id = "tui"
 title = "Ank"
 placement = "overlay"
 command = ["./target/release/herdr-ank", "tui"]
+
+[[startup]]
+command = ["./target/release/herdr-ank", "daemon"]

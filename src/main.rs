@@ -47,6 +47,7 @@ fn main() -> ExitCode {
     let result = match cli.command {
         Command::Work => run_work(),
         Command::Pick => run_pick(),
+        Command::Daemon => herdr_ank::daemon::run(),
         other => Err(format!("herdr-ank {}: not implemented yet", other.name())),
     };
     match result {

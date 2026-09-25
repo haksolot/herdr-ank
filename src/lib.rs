@@ -2,6 +2,7 @@
 
 pub mod ank;
 pub mod config;
+pub mod daemon;
 pub mod herdr;
 pub mod pick;
 pub mod sync;

@@ -1,0 +1,373 @@
+//! The `[[startup]]` process (ADR-c8e7e56e5219): one instance per herdr,
+//! a sync at start, then one per burst of herdr events or `events.jsonl`
+//! lines, at most one a second and at least one every `sync.poll_seconds`.
+//!
+//! Journal: stderr only, one line per sync, which `herdr plugin log list`
+//! reads back.
+
+use std::collections::BTreeSet;
+use std::fs::{self, File, OpenOptions};
+use std::io;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use crate::ank;
+use crate::config::Config;
+use crate::herdr::{self, Event, Subscription};
+use crate::sync::{self, Corpus};
+
+const LOCK_FILE: &str = "daemon.lock";
+
+/// Syncs are coalesced to one per this gap (ADR-c8e7e56e5219).
+const MIN_GAP: Duration = Duration::from_secs(1);
+
+/// The backoff after losing herdr's socket grows to this and stays there.
+const MAX_BACKOFF: Duration = Duration::from_secs(30);
+
+/// How often `events.jsonl` is looked at.
+const TAIL_EVERY: Duration = Duration::from_secs(1);
+
+/// The kinds ADR-c8e7e56e5219 lists that herdr accepts without a pane.
+const KINDS: [&str; 7] = [
+    "pane.created",
+    "pane.closed",
+    "pane.agent_detected",
+    "worktree.created",
+    "worktree.opened",
+    "worktree.removed",
+    "workspace.closed",
+];
+
+/// herdr 0.9.1 refuses this kind without a `pane_id`: one per agent pane.
+const PER_PANE_KIND: &str = "pane.agent_status_changed";
+
+/// The single-instance lock: an exclusive `flock` on a file of the plugin's
+/// state directory, released when the process ends, however it ends.
+#[derive(Debug)]
+pub struct Lock {
+    _file: File,
+}
+
+impl Lock {
+    /// `None` when another process holds the lock.
+    pub fn acquire(state_dir: &Path) -> io::Result<Option<Lock>> {
+        fs::create_dir_all(state_dir)?;
+        let file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(state_dir.join(LOCK_FILE))?;
+        match file.try_lock() {
+            Ok(()) => Ok(Some(Lock { _file: file })),
+            Err(fs::TryLockError::WouldBlock) => Ok(None),
+            Err(fs::TryLockError::Error(err)) => Err(err),
+        }
+    }
+}
+
+/// When the next sync is due. Pure: the caller hands it the clock.
+#[derive(Debug, Clone)]
+pub struct Schedule {
+    min_gap: Duration,
+    max_gap: Duration,
+    last: Option<Instant>,
+    pending: bool,
+}
+
+impl Schedule {
+    /// A sync is due at once, then after a trigger once `min_gap` has passed
+    /// since the last one, and in any case `max_gap` after it.
+    pub fn new(min_gap: Duration, max_gap: Duration) -> Self {
+        Schedule {
+            min_gap,
+            max_gap,
+            last: None,
+            pending: false,
+        }
+    }
+
+    /// Something moved: an event, a line of `events.jsonl`.
+    pub fn trigger(&mut self) {
+        self.pending = true;
+    }
+
+    pub fn ran(&mut self, now: Instant) {
+        self.last = Some(now);
+        self.pending = false;
+    }
+
+    pub fn due(&self, now: Instant) -> bool {
+        self.wait(now).is_zero()
+    }
+
+    /// How long until the next sync is due; zero when it is.
+    pub fn wait(&self, now: Instant) -> Duration {
+        let Some(last) = self.last else {
+            return Duration::ZERO;
+        };
+        let gap = if self.pending {
+            self.min_gap
+        } else {
+            self.max_gap
+        };
+        (last + gap).saturating_duration_since(now)
+    }
+}
+
+/// Whole minutes from `now_unix` to `expiry` (`YYYY-MM-DDTHH:MM:SSZ`, as
+/// `ank status --json` writes it), rounded up; 0 once it has passed.
+pub fn minutes_until(expiry: &str, now_unix: u64) -> Option<u64> {
+    let at = parse_utc(expiry)?;
+    Some(at.saturating_sub(now_unix).div_ceil(60))
+}
+
+fn parse_utc(s: &str) -> Option<u64> {
+    let s = s.strip_suffix('Z')?;
+    let (date, time) = s.split_once('T')?;
+    let mut date = date.splitn(3, '-').map(str::parse::<i64>);
+    let (y, m, d) = (date.next()?.ok()?, date.next()?.ok()?, date.next()?.ok()?);
+    let time = time.split('.').next()?;
+    let mut time = time.splitn(3, ':').map(str::parse::<i64>);
+    let (hh, mm, ss) = (time.next()?.ok()?, time.next()?.ok()?, time.next()?.ok()?);
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) || hh > 23 || mm > 59 || ss > 60 {
+        return None;
+    }
+    // Days from civil, Howard Hinnant's algorithm.
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    u64::try_from(days * 86_400 + hh * 3_600 + mm * 60 + ss).ok()
+}
+
+/// `herdr-ank daemon`.
+pub fn run() -> Result<(), String> {
+    // ank must answer as the bare <user>@<host> herdr runs under, not as
+    // whatever agent pane herdr happened to be started from.
+    std::env::remove_var("ANK_AGENT");
+    let state_dir = env_path("HERDR_PLUGIN_STATE_DIR")?;
+    let Some(_lock) =
+        Lock::acquire(&state_dir).map_err(|e| format!("herdr-ank daemon: lock: {e}"))?
+    else {
+        eprintln!("herdr-ank daemon: another instance holds the lock, exiting");
+        return Ok(());
+    };
+    let config = Config::load(&env_path("HERDR_PLUGIN_CONFIG_DIR")?).map_err(|e| e.to_string())?;
+    let herdr = herdr::Client::from_env().map_err(|e| format!("herdr-ank daemon: {e}"))?;
+
+    let (tx, rx) = mpsc::channel::<()>();
+    {
+        let herdr = herdr.clone();
+        let tx = tx.clone();
+        thread::spawn(move || subscribe_forever(&herdr, &tx));
+    }
+    if let Some(events) = events_jsonl() {
+        let tx = tx.clone();
+        thread::spawn(move || tail_forever(&events, &tx));
+    }
+    drop(tx);
+
+    let poll = Duration::from_secs(config.sync.poll_seconds.max(1));
+    let mut schedule = Schedule::new(MIN_GAP, poll);
+    loop {
+        let now = Instant::now();
+        if schedule.due(now) {
+            match sync_once(&herdr, &config) {
+                Ok(reports) => eprintln!("herdr-ank daemon: sync, {reports} report(s)"),
+                Err(err) => eprintln!("herdr-ank daemon: sync failed: {err}"),
+            }
+            schedule.ran(Instant::now());
+            continue;
+        }
+        match rx.recv_timeout(schedule.wait(now)) {
+            Ok(()) => schedule.trigger(),
+            Err(RecvTimeoutError::Timeout) => {}
+            // Both feeders gone: only the poll is left.
+            Err(RecvTimeoutError::Disconnected) => thread::sleep(schedule.wait(Instant::now())),
+        }
+    }
+}
+
+/// One pass: read herdr and every corpus an agent pane sits in, plan, report.
+pub fn sync_once(herdr: &herdr::Client, config: &Config) -> Result<usize, String> {
+    let panes = herdr.pane_list(None).map_err(|e| e.to_string())?;
+    let agents = herdr.agent_list().map_err(|e| e.to_string())?;
+
+    let roots: BTreeSet<PathBuf> = panes
+        .iter()
+        .filter(|p| agents.iter().any(|a| a.pane_id == p.pane_id))
+        .filter_map(|p| corpus_root(p.cwd.as_deref()?))
+        .collect();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    // A corpus ank could not read this pass is left out, and so are its
+    // panes: planned without it, they would lose their tokens to a glitch.
+    let mut unread = BTreeSet::new();
+    let mut corpora: Vec<Corpus> = Vec::new();
+    for root in roots {
+        match read_corpus(&root, now) {
+            Ok(corpus) => corpora.push(corpus),
+            Err(err) => {
+                eprintln!("herdr-ank daemon: {}: {err}", root.display());
+                unread.insert(root);
+            }
+        }
+    }
+    let panes: Vec<_> = panes
+        .into_iter()
+        .filter(|p| {
+            let root = p.cwd.as_deref().and_then(corpus_root);
+            !root.is_some_and(|r| unread.contains(&r))
+        })
+        .collect();
+
+    let reports = sync::plan(&panes, &agents, &corpora, config);
+    for report in &reports {
+        let tokens: Vec<(&str, &str)> = report
+            .tokens
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        let clear: Vec<&str> = report.clear.iter().map(String::as_str).collect();
+        if let Err(err) =
+            herdr.report_metadata(&report.pane_id, &tokens, &clear, Some(report.ttl_ms))
+        {
+            eprintln!("herdr-ank daemon: report on {}: {err}", report.pane_id);
+        }
+    }
+    Ok(reports.len())
+}
+
+/// The first directory from `cwd` up that carries a corpus. Only the
+/// presence of `.ank` is looked at, nothing inside it (ADR-3cd19cd6acb9).
+fn corpus_root(cwd: &Path) -> Option<PathBuf> {
+    cwd.ancestors()
+        .find(|dir| dir.join(".ank").is_dir())
+        .map(Path::to_path_buf)
+}
+
+fn read_corpus(root: &Path, now_unix: u64) -> Result<Corpus, ank::AnkError> {
+    let client = ank::Client::new(root);
+    let in_progress = client.find(&["--status", "in_progress"])?;
+    let context = client.context(None)?;
+    let status = client.status()?;
+    let held = status.claim.iter().map(|c| (&c.id, Some(&c.expires)));
+    let elsewhere = status.elsewhere.iter().map(|e| (&e.id, e.expires.as_ref()));
+    let expires_in = held
+        .chain(elsewhere)
+        .filter_map(|(id, expires)| Some((id.clone(), minutes_until(expires?, now_unix)?)))
+        .collect();
+    Ok(Corpus {
+        root: root.to_path_buf(),
+        in_progress,
+        context,
+        expires_in,
+    })
+}
+
+/// Subscribes, forwards every event as a trigger, and reconnects: at once
+/// when an agent pane may have appeared or gone (its per-pane subscription
+/// has to follow), with a backoff up to 30 s when the socket is lost.
+fn subscribe_forever(herdr: &herdr::Client, tx: &Sender<()>) {
+    let mut backoff = Duration::from_secs(1);
+    loop {
+        match subscribe_once(herdr, tx) {
+            Ok(Ended::Resubscribe) => backoff = Duration::from_secs(1),
+            Ok(Ended::ReceiverGone) => return,
+            Ok(Ended::Closed) => {
+                eprintln!(
+                    "herdr-ank daemon: herdr socket closed, retrying in {}s",
+                    backoff.as_secs()
+                );
+                thread::sleep(backoff);
+                backoff = (backoff * 2).min(MAX_BACKOFF);
+            }
+            Err(err) => {
+                eprintln!(
+                    "herdr-ank daemon: herdr socket: {err}, retrying in {}s",
+                    backoff.as_secs()
+                );
+                thread::sleep(backoff);
+                backoff = (backoff * 2).min(MAX_BACKOFF);
+            }
+        }
+    }
+}
+
+enum Ended {
+    Resubscribe,
+    ReceiverGone,
+    Closed,
+}
+
+fn subscribe_once(herdr: &herdr::Client, tx: &Sender<()>) -> Result<Ended, herdr::HerdrError> {
+    let agents = herdr.agent_list()?;
+    let mut subscriptions: Vec<Subscription> = KINDS.iter().map(|k| Subscription::new(k)).collect();
+    subscriptions.extend(
+        agents
+            .iter()
+            .map(|a| Subscription::for_pane(PER_PANE_KIND, &a.pane_id)),
+    );
+    for event in herdr.subscribe(&subscriptions)? {
+        if tx.send(()).is_err() {
+            return Ok(Ended::ReceiverGone);
+        }
+        if matches!(
+            event,
+            Event::PaneCreated(_) | Event::PaneClosed { .. } | Event::PaneAgentDetected { .. }
+        ) {
+            return Ok(Ended::Resubscribe);
+        }
+    }
+    Ok(Ended::Closed)
+}
+
+/// `events.jsonl` beside the `watch.yml` that `ank watch --where` names, or
+/// `None` when ank cannot say. The file itself may appear later.
+fn events_jsonl() -> Option<PathBuf> {
+    let output = Command::new("ank")
+        .args(["watch", "--where"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let watch_yml = PathBuf::from(String::from_utf8(output.stdout).ok()?.trim());
+    Some(watch_yml.parent()?.join("events.jsonl"))
+}
+
+/// A trigger for every growth of `path`; a missing file is only waited for.
+/// The lines are not read: that the corpus moved is all they say here.
+fn tail_forever(path: &Path, tx: &Sender<()>) {
+    let size = |p: &Path| fs::metadata(p).map(|m| m.len()).ok();
+    let mut last = size(path);
+    loop {
+        thread::sleep(TAIL_EVERY);
+        let now = size(path);
+        let moved = match (last, now) {
+            (Some(before), Some(after)) => after != before,
+            (None, Some(after)) => after > 0,
+            _ => false,
+        };
+        last = now;
+        if moved && tx.send(()).is_err() {
+            return;
+        }
+    }
+}
+
+fn env_path(var: &str) -> Result<PathBuf, String> {
+    match std::env::var_os(var) {
+        Some(value) if !value.is_empty() => Ok(value.into()),
+        _ => Err(format!(
+            "herdr-ank daemon: {var} is not set; herdr sets it for a plugin"
+        )),
+    }
+}
