@@ -5,7 +5,7 @@ slug: le-test-du-verrou-du-daemon-ne-d-pend-plus-d-un
 title: Le test du verrou du daemon ne dépend plus d'un fork concurrent
 created: 2026-09-25T19:34:12Z
 author: haksolot@omarchy/ank-1
-status: open
+status: done
 scope:
   - src/daemon/**
   - tests/daemon.rs
@@ -15,8 +15,27 @@ done_criteria: |
 criteria_by: creator
 verify: [cargo-test, clippy, fmt-check]
 method: diagnose
+proof:
+  - type: test
+    ref: local/0b606211825c@190da6a
+    tree: scope/5d008576027c
+    criteria: 58e922080b2c
+    verifier: cargo-test@f14aeab36e1b
+    via: verifier
+  - type: test
+    ref: local/e3b0c44298fc@190da6a
+    tree: scope/5d008576027c
+    criteria: 58e922080b2c
+    verifier: clippy@d335c02ef52c
+    via: verifier
+  - type: test
+    ref: local/e3b0c44298fc@190da6a
+    tree: scope/5d008576027c
+    criteria: 58e922080b2c
+    verifier: fmt-check@5ca6d10bcd55
+    via: verifier
 schema: 4
-version: 1
+version: 3
 ---
 
 Découvert pendant TASK-194a : run https://github.com/haksolot/herdr-ank/actions/runs/36180142206 tentative 1, ubuntu-latest rouge sur tests/daemon.rs:37 « a dropped lock is free », vert en tentative 2 sans changement. Lock::acquire prend un flock (File::try_lock) sur une description de fichier ouverte ; les autres tests de daemon.rs spawnent herdr-ank, et un enfant forké entre l'ouverture et l'exec hérite du descripteur (fermé seulement à l'exec par O_CLOEXEC), donc le verrou survit un instant au drop. Hypothèse à confirmer, pas une cause établie.
