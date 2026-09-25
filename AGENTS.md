@@ -16,6 +16,11 @@ This repo uses Ank: tasks and decisions live in `.ank/`.
   If the fast-forward is refused, `main` moved: rebase again and retry. Never
   `--no-ff`, never resolve a conflict in the integration tree. The next pass
   starts from a fresh branch off the new `main`.
+- Scope overlap: every module task lists `Cargo.toml`, `Cargo.lock`,
+  `src/lib.rs` and `src/main.rs` because registering a module or a dependency
+  touches them. An intersection between two live claims that is confined to
+  those four files is not a collision: the landing rule above (rebase, then
+  fast-forward) resolves it. Any other shared path is.
 - Verifiers are `cargo test`, `cargo clippy -D warnings`, `cargo fmt --check`;
   `ank done` runs them itself. `target/` is ignored by git.
 - Commit messages: one line on what and why; no attribution trailer needed.
