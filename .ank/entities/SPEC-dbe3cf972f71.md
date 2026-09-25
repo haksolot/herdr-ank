@@ -5,12 +5,16 @@ slug: ce-que-le-plugin-rapporte-herdr-tokens-de-pane-s
 title: "Ce que le plugin rapporte à herdr : tokens de pane, source, ttl"
 created: 2026-09-25T16:52:34Z
 author: haksolot@omarchy
-status: proposed
+status: accepted
 scope:
   - src/sync/**
 references: [ADR-fa8b6a103597, ADR-357c017baf9b]
+ratified: ebba29b2f093
+verified:
+  - by: haksolot@omarchy
+    at: 2026-09-25T17:11:52Z
 schema: 4
-version: 1
+version: 2
 ---
 
 Le plugin ne possède aucune surface d'affichage : ce qu'il montre, il le
