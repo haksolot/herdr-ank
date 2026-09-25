@@ -5,13 +5,17 @@ slug: le-plugin-lit-et-crit-le-corpus-ank-uniquement-t
 title: Le plugin lit et écrit le corpus ank uniquement à travers ank <verbe> --json
 created: 2026-09-25T16:52:32Z
 author: haksolot@omarchy
-status: proposed
+status: accepted
 scope:
   - src/**
 constraint: |
   Aucun code du plugin n'ouvre un fichier sous .ank/ ni un ref sous refs/ank/. Toute lecture passe par ank <verbe> --json --repo <chemin>, le champ contract est vérifié avant de lire le reste, un champ inconnu est ignoré, et le code de sortie (0 à 9) est routé avant tout parsing. ank check et ank review ne sont jamais appelés par le daemon ni sur un timer : un poll utilise status, find, show ou context.
+ratified: 26d5afbf924d
+verified:
+  - by: haksolot@omarchy
+    at: 2026-09-25T17:11:52Z
 schema: 4
-version: 1
+version: 2
 ---
 
 docs/integrating.md d'ank est explicite : l'état d'une tâche n'est pas dans son
