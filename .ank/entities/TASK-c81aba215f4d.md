@@ -11,6 +11,10 @@ scope:
   - src/pick.rs
   - herdr-plugin.toml
   - tests/work.rs
+  - Cargo.toml
+  - Cargo.lock
+  - src/lib.rs
+  - src/main.rs
 blocked_by: [TASK-dadb4d2261b5, TASK-de0a51842971, TASK-90fb516a9fcf]
 done_criteria: |
   `herdr-plugin.toml` déclare `[[actions]] id = "work"`, contexte `workspace`, commande `herdr-ank work`, et `[[panes]] id = "pick"` en `popup`. `herdr-ank work` ouvre la pane `pick` qui liste les tâches claimables du corpus du workspace (`context --json`, ni tenues ni bloquées), filtrables au clavier ; la sélection écrit l'id dans `HERDR_PLUGIN_STATE_DIR`. `work` enchaîne alors : `worktree create --branch task/<id court> --base <default_branch>`, `tab create --cwd <worktree> --env ANK_AGENT=<user>@<host>/<nom>` où `<nom>` est `ank-<id court>`, `agent start <nom> --kind <config> --pane <pane de l'onglet>`, puis `agent prompt <nom> "ank claim <id>"`. Si le claim échoue avec le code 4, l'utilisateur est notifié et le worktree n'est pas supprimé. Le test couvre l'ordre exact des appels herdr sur le binaire factice, et le refus propre quand le workspace n'a pas de corpus.
@@ -18,7 +22,7 @@ criteria_by: creator
 verify: [cargo-test, clippy, fmt-check]
 method: tdd
 schema: 4
-version: 1
+version: 2
 ---
 
 La fonction qui applique « un agent, un arbre, une identité » sans que
