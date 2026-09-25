@@ -1,17 +1,28 @@
 //! The herdr boundary (ADR-357c017baf9b): every action is an argv handed to a
-//! fake `herdr` that records it, and the event stream is a fixed NDJSON file
-//! served over a real Unix socket.
+//! fake `herdr` that records it, and the event stream is a fixed NDJSON file,
+//! replayed through an in-memory stream on every OS and served over a real
+//! Unix socket on Unix (ADR-599b6f424271).
 
+use std::cell::RefCell;
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+#[cfg(unix)]
+use std::io::{BufRead, BufReader};
+use std::io::{Cursor, Read, Write};
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+#[cfg(unix)]
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(unix)]
 use std::thread;
+#[cfg(unix)]
 use std::time::{Duration, Instant};
 
-use herdr_ank::herdr::{Client, Event, HerdrError, Sound, Subscription, TabCreate, WorktreeCreate};
+use herdr_ank::herdr::{subscribe_over, Client, Event, HerdrError, Subscription};
+#[cfg(unix)]
+use herdr_ank::herdr::{Sound, TabCreate, WorktreeCreate};
 
 static NEXT_DIR: AtomicUsize = AtomicUsize::new(0);
 
@@ -34,6 +45,8 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
+// The fake is a sh script until the tests get a portable helper binary.
+#[cfg(unix)]
 /// A fake `herdr`: writes its argv, NUL-separated, then answers like the real
 /// binary does, `stdout` and exit 0 or `stderr` and exit 1.
 struct FakeHerdr {
@@ -41,6 +54,7 @@ struct FakeHerdr {
     bin: PathBuf,
 }
 
+#[cfg(unix)]
 impl FakeHerdr {
     fn answering(name: &str, response: &str) -> Self {
         Self::build(name, response, 0)
@@ -91,8 +105,10 @@ impl FakeHerdr {
     }
 }
 
+#[cfg(unix)]
 const PANE: &str = r#"{"pane_id":"w1:p2","workspace_id":"w1","tab_id":"w1:t1","agent":"claude","agent_status":"working","cwd":"/src/repo","focused":false,"revision":3,"tokens":{"ank":"TASK-de0a"},"a_field_herdr_added_later":true}"#;
 
+#[cfg(unix)]
 #[test]
 fn from_env_reads_bin_and_socket_and_names_what_is_missing() {
     // The only test touching these variables, so no other test races it.
@@ -115,6 +131,7 @@ fn from_env_reads_bin_and_socket_and_names_what_is_missing() {
     assert_eq!(fake.argv(), ["agent", "list"]);
 }
 
+#[cfg(unix)]
 #[test]
 fn pane_list_passes_the_workspace_and_decodes_panes() {
     let fake = FakeHerdr::answering(
@@ -134,6 +151,7 @@ fn pane_list_passes_the_workspace_and_decodes_panes() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn pane_list_without_workspace_passes_no_flag() {
     let fake = FakeHerdr::answering(
@@ -144,6 +162,7 @@ fn pane_list_without_workspace_passes_no_flag() {
     assert_eq!(fake.argv(), ["pane", "list"]);
 }
 
+#[cfg(unix)]
 #[test]
 fn agent_list_decodes_agents() {
     let fake = FakeHerdr::answering(
@@ -155,6 +174,7 @@ fn agent_list_decodes_agents() {
     assert_eq!(agents[0].pane_id, "w1:p2");
 }
 
+#[cfg(unix)]
 #[test]
 fn report_metadata_sets_and_clears_tokens_under_the_plugin_source() {
     let fake = FakeHerdr::answering(
@@ -189,6 +209,7 @@ fn report_metadata_sets_and_clears_tokens_under_the_plugin_source() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn report_metadata_without_ttl_passes_no_ttl() {
     let fake = FakeHerdr::answering(
@@ -212,6 +233,7 @@ fn report_metadata_without_ttl_passes_no_ttl() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn notification_show_passes_title_body_and_sound() {
     let fake = FakeHerdr::answering(
@@ -239,6 +261,7 @@ fn notification_show_passes_title_body_and_sound() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn worktree_create_passes_every_flag_and_returns_the_root_pane() {
     let fake = FakeHerdr::answering(
@@ -279,6 +302,7 @@ fn worktree_create_passes_every_flag_and_returns_the_root_pane() {
     assert_eq!(root.pane_id, "w1:p2");
 }
 
+#[cfg(unix)]
 #[test]
 fn tab_create_passes_cwd_env_label_and_focus() {
     let fake = FakeHerdr::answering(
@@ -316,6 +340,7 @@ fn tab_create_passes_cwd_env_label_and_focus() {
     assert_eq!(root.tab_id, "w1:t1");
 }
 
+#[cfg(unix)]
 #[test]
 fn agent_start_names_kind_and_pane() {
     let fake = FakeHerdr::answering(
@@ -335,6 +360,7 @@ fn agent_start_names_kind_and_pane() {
     assert_eq!(agent.pane_id, "w1:p2");
 }
 
+#[cfg(unix)]
 #[test]
 fn agent_start_passes_agent_args_after_a_double_dash() {
     let fake = FakeHerdr::answering(
@@ -360,6 +386,7 @@ fn agent_start_passes_agent_args_after_a_double_dash() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn agent_prompt_passes_the_text_as_one_argument_untouched_by_a_shell() {
     let fake = FakeHerdr::answering(
@@ -373,6 +400,7 @@ fn agent_prompt_passes_the_text_as_one_argument_untouched_by_a_shell() {
     assert_eq!(fake.argv(), ["agent", "prompt", "ank-2", text]);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_cli_error_is_a_herdr_error_carrying_code_and_message() {
     let fake = FakeHerdr::failing(
@@ -391,6 +419,7 @@ fn a_cli_error_is_a_herdr_error_carrying_code_and_message() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn a_cli_failure_without_json_is_a_herdr_error_not_a_panic() {
     let fake = FakeHerdr::failing("cli-garbage", "usage: herdr agent list\n");
@@ -410,8 +439,48 @@ fn a_missing_binary_is_a_herdr_error() {
     assert!(matches!(client.agent_list(), Err(HerdrError::Io { .. })));
 }
 
+/// herdr's end of the socket, in memory: what it will answer, and what it
+/// was sent.
+struct Replay {
+    answer: Cursor<Vec<u8>>,
+    sent: Rc<RefCell<Vec<u8>>>,
+}
+
+impl Read for Replay {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.answer.read(buf)
+    }
+}
+
+impl Write for Replay {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.sent.borrow_mut().write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Subscribes over a stream that answers `fixture_name`, and hands back the
+/// events read and the request sent. Runs on every OS.
+fn replay(
+    fixture_name: &str,
+    subscriptions: &[Subscription],
+) -> (Result<Vec<Event>, HerdrError>, String) {
+    let sent = Rc::new(RefCell::new(Vec::new()));
+    let stream = Replay {
+        answer: Cursor::new(fs::read(fixture(fixture_name)).unwrap()),
+        sent: Rc::clone(&sent),
+    };
+    let events = subscribe_over(stream, "the replay", subscriptions).map(Iterator::collect);
+    let request = String::from_utf8(sent.borrow().clone()).unwrap();
+    (events, request)
+}
+
 /// Serves `fixture` to the first client and hands back the request line it
 /// sent, or an empty line when no client came within five seconds.
+#[cfg(unix)]
 fn serve(name: &str, fixture_name: &str) -> (Client, thread::JoinHandle<String>) {
     let dir = tempdir(name);
     let socket = dir.join("herdr.sock");
@@ -440,13 +509,12 @@ fn serve(name: &str, fixture_name: &str) -> (Client, thread::JoinHandle<String>)
 
 #[test]
 fn subscribe_sends_one_ndjson_events_subscribe_request() {
-    let (client, server) = serve("subscribe-request", "events.ndjson");
     let subs = [
         Subscription::new("pane.updated"),
         Subscription::for_pane("pane.agent_status_changed", "w1:p2"),
     ];
-    let events: Vec<Event> = client.subscribe(&subs).unwrap().collect();
-    let request = server.join().unwrap();
+    let (events, request) = replay("events.ndjson", &subs);
+    let events = events.unwrap();
 
     assert!(request.ends_with('\n'), "a request is one NDJSON line");
     let request: serde_json::Value = serde_json::from_str(&request).unwrap();
@@ -464,12 +532,9 @@ fn subscribe_sends_one_ndjson_events_subscribe_request() {
 
 #[test]
 fn subscribe_decodes_the_fixed_stream_and_skips_the_unknown_type() {
-    let (client, server) = serve("subscribe-decode", "events.ndjson");
-    let events: Vec<Event> = client
-        .subscribe(&[Subscription::new("pane.updated")])
-        .unwrap()
-        .collect();
-    server.join().unwrap();
+    let events = replay("events.ndjson", &[Subscription::new("pane.updated")])
+        .0
+        .unwrap();
 
     assert_eq!(events.len(), 4, "{events:#?}");
     match &events[0] {
@@ -508,9 +573,10 @@ fn subscribe_decodes_the_fixed_stream_and_skips_the_unknown_type() {
 
 #[test]
 fn an_error_response_to_subscribe_is_a_herdr_error_not_a_panic() {
-    let (client, server) = serve("subscribe-error", "subscribe_error.ndjson");
-    let result = client.subscribe(&[Subscription::new("pane.agent_status_changed")]);
-    server.join().unwrap();
+    let (result, _) = replay(
+        "subscribe_error.ndjson",
+        &[Subscription::new("pane.agent_status_changed")],
+    );
     match result {
         Err(HerdrError::Api { code, message }) => {
             assert_eq!(code, "invalid_request");
@@ -518,6 +584,35 @@ fn an_error_response_to_subscribe_is_a_herdr_error_not_a_panic() {
         }
         Err(other) => panic!("expected HerdrError::Api, got {other:?}"),
         Ok(_) => panic!("expected HerdrError::Api, got a stream"),
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn subscribe_over_a_unix_socket_sends_the_request_and_reads_the_stream() {
+    let (client, server) = serve("subscribe-socket", "events.ndjson");
+    let events: Vec<Event> = client
+        .subscribe(&[Subscription::new("pane.updated")])
+        .unwrap()
+        .collect();
+    let request = server.join().unwrap();
+
+    let request: serde_json::Value = serde_json::from_str(&request).unwrap();
+    assert_eq!(request["method"], "events.subscribe");
+    assert_eq!(events.len(), 4, "{events:#?}");
+}
+
+#[cfg(windows)]
+#[test]
+fn subscribe_to_an_absent_named_pipe_is_a_herdr_error_naming_the_pipe() {
+    let pipe = format!(r"\\.\pipe\herdr-ank-test-absent-{}", std::process::id());
+    let client = Client::new("herdr.exe", &pipe);
+    match client.subscribe(&[Subscription::new("pane.updated")]) {
+        Err(err @ HerdrError::Io { .. }) => {
+            assert!(err.to_string().contains(&pipe), "{err}")
+        }
+        Err(other) => panic!("expected HerdrError::Io, got {other:?}"),
+        Ok(_) => panic!("expected HerdrError::Io, got a stream"),
     }
 }
 
@@ -531,6 +626,7 @@ fn subscribe_to_an_absent_socket_is_a_herdr_error() {
     ));
 }
 
+#[cfg(unix)]
 #[test]
 fn plugin_pane_open_names_the_entrypoint_and_returns_the_opened_pane() {
     let fake = FakeHerdr::answering(
@@ -566,6 +662,7 @@ fn plugin_pane_open_names_the_entrypoint_and_returns_the_opened_pane() {
     assert_eq!(opened.pane.pane_id, "w1:p2");
 }
 
+#[cfg(unix)]
 #[test]
 fn plugin_pane_open_without_workspace_or_env_passes_neither() {
     let fake = FakeHerdr::answering(
@@ -590,6 +687,7 @@ fn plugin_pane_open_without_workspace_or_env_passes_neither() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn plugin_pane_open_refused_is_an_api_error() {
     // As herdr 0.9.1 answers an unknown entrypoint: the body on stderr, exit 1.
@@ -605,12 +703,12 @@ fn plugin_pane_open_refused_is_an_api_error() {
 
 #[test]
 fn subscribe_decodes_the_lifecycle_events_the_daemon_wakes_on() {
-    let (client, server) = serve("subscribe-lifecycle", "lifecycle_events.ndjson");
-    let events: Vec<Event> = client
-        .subscribe(&[Subscription::new("worktree.created")])
-        .unwrap()
-        .collect();
-    server.join().unwrap();
+    let events = replay(
+        "lifecycle_events.ndjson",
+        &[Subscription::new("worktree.created")],
+    )
+    .0
+    .unwrap();
 
     assert_eq!(
         events,
@@ -641,6 +739,7 @@ fn subscribe_decodes_the_lifecycle_events_the_daemon_wakes_on() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_verb_whose_result_is_not_read_succeeds_on_an_empty_stdout() {
     // herdr 0.9.1 `pane report-metadata` exits 0 and writes nothing.
@@ -658,6 +757,7 @@ fn a_verb_whose_result_is_not_read_succeeds_on_an_empty_stdout() {
         .expect("an empty stdout with exit 0 is a success");
 }
 
+#[cfg(unix)]
 #[test]
 fn a_verb_whose_result_is_read_still_fails_on_an_empty_stdout() {
     let fake = FakeHerdr::answering("empty-list", "");

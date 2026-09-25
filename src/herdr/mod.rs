@@ -18,7 +18,7 @@ use std::process::Command;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
-pub use events::{Event, Subscription};
+pub use events::{subscribe_over, Event, Subscription};
 
 /// The plugin id, as `herdr-plugin.toml` declares it.
 pub const PLUGIN_ID: &str = "ank";

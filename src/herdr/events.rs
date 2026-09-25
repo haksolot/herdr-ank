@@ -1,9 +1,10 @@
 //! `events.subscribe` over `$HERDR_SOCKET_PATH`, read as NDJSON: one request
-//! line out, an acknowledgement line back, then one event per line.
+//! line out, an acknowledgement line back, then one event per line. The path
+//! names a Unix socket, or a named pipe on Windows (ADR-599b6f424271); the
+//! dialogue is the same.
 
-use std::io::{BufRead, BufReader, Lines, Write};
-use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
+use std::io::{self, BufRead, BufReader, Lines, Read, Write};
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -155,6 +156,47 @@ struct WorktreeGone {
     worktree: WorktreeRef,
 }
 
+/// The byte stream to herdr's API: a Unix socket, connected.
+#[cfg(unix)]
+struct Connection(std::os::unix::net::UnixStream);
+
+/// The byte stream to herdr's API: a named pipe in byte mode, which std opens,
+/// reads and writes as a file.
+#[cfg(windows)]
+struct Connection(std::fs::File);
+
+impl Connection {
+    #[cfg(unix)]
+    fn open(path: &Path) -> io::Result<Self> {
+        std::os::unix::net::UnixStream::connect(path).map(Connection)
+    }
+
+    #[cfg(windows)]
+    fn open(path: &Path) -> io::Result<Self> {
+        std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)
+            .map(Connection)
+    }
+}
+
+impl Read for Connection {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.0.read(buf)
+    }
+}
+
+impl Write for Connection {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.0.flush()
+    }
+}
+
 impl Client {
     /// Opens the socket, subscribes, and waits for herdr's acknowledgement.
     /// An `error` answer is a [`HerdrError::Api`]. The stream ends when the
@@ -163,49 +205,63 @@ impl Client {
         &self,
         subscriptions: &[Subscription],
     ) -> Result<impl Iterator<Item = Event>, HerdrError> {
-        let io = |context: &str| {
-            let context = format!("{context} {}", self.socket.display());
-            move |source| HerdrError::Io { context, source }
-        };
-        let mut stream = UnixStream::connect(&self.socket).map_err(io("connecting to"))?;
-        let request = Request {
-            id: "herdr-ank:subscribe",
-            method: "events.subscribe",
-            params: Params { subscriptions },
-        };
-        let mut line = serde_json::to_vec(&request)
-            .map_err(|err| HerdrError::Decode(format!("encoding the request: {err}")))?;
-        line.push(b'\n');
-        stream.write_all(&line).map_err(io("writing to"))?;
-
-        let mut lines = BufReader::new(stream).lines();
-        let ack = match lines.next() {
-            Some(line) => line.map_err(io("reading from"))?,
-            None => {
-                return Err(HerdrError::Decode(
-                    "the socket closed before acknowledging events.subscribe".into(),
-                ))
-            }
-        };
-        match serde_json::from_str::<Line>(&ack) {
-            Ok(Line {
-                error: Some(body), ..
-            }) => Err(body.into()),
-            Ok(Line {
-                result: Some(_), ..
-            }) => Ok(EventStream { lines }),
-            _ => Err(HerdrError::Decode(format!(
-                "events.subscribe acknowledgement: {ack}"
-            ))),
-        }
+        let name = self.socket.display().to_string();
+        let stream = Connection::open(&self.socket).map_err(|source| HerdrError::Io {
+            context: format!("connecting to {name}"),
+            source,
+        })?;
+        subscribe_over(stream, &name, subscriptions)
     }
 }
 
-struct EventStream {
-    lines: Lines<BufReader<UnixStream>>,
+/// `events.subscribe` over a stream already open to herdr, which `name`
+/// designates in errors. [`Client::subscribe`] is this over the socket.
+pub fn subscribe_over<S: Read + Write>(
+    mut stream: S,
+    name: &str,
+    subscriptions: &[Subscription],
+) -> Result<impl Iterator<Item = Event>, HerdrError> {
+    let io = |context: &str| {
+        let context = format!("{context} {name}");
+        move |source| HerdrError::Io { context, source }
+    };
+    let request = Request {
+        id: "herdr-ank:subscribe",
+        method: "events.subscribe",
+        params: Params { subscriptions },
+    };
+    let mut line = serde_json::to_vec(&request)
+        .map_err(|err| HerdrError::Decode(format!("encoding the request: {err}")))?;
+    line.push(b'\n');
+    stream.write_all(&line).map_err(io("writing to"))?;
+
+    let mut lines = BufReader::new(stream).lines();
+    let ack = match lines.next() {
+        Some(line) => line.map_err(io("reading from"))?,
+        None => {
+            return Err(HerdrError::Decode(
+                "the socket closed before acknowledging events.subscribe".into(),
+            ))
+        }
+    };
+    match serde_json::from_str::<Line>(&ack) {
+        Ok(Line {
+            error: Some(body), ..
+        }) => Err(body.into()),
+        Ok(Line {
+            result: Some(_), ..
+        }) => Ok(EventStream { lines }),
+        _ => Err(HerdrError::Decode(format!(
+            "events.subscribe acknowledgement: {ack}"
+        ))),
+    }
 }
 
-impl Iterator for EventStream {
+struct EventStream<S> {
+    lines: Lines<BufReader<S>>,
+}
+
+impl<S: Read> Iterator for EventStream<S> {
     type Item = Event;
 
     fn next(&mut self) -> Option<Event> {
