@@ -32,7 +32,7 @@ herdr plugin link .
 
 | Function | Triggered by |
 |---|---|
-| **Sidebar tokens.** Each agent pane inside a corpus reports the task it holds, its title, the minutes left on the claim and the claimable count (tokens below). | The daemon, started by herdr at launch (`[[startup]]`): it syncs on herdr events, on `ank watch`'s `events.jsonl` when it exists, and every `sync.poll_seconds`. |
+| **Sidebar tokens.** Each agent pane inside a corpus reports the task it holds, its title, the minutes left on the claim and the claimable count (tokens below). | The daemon (see *Daemon lifecycle*): it syncs on herdr events, on `ank watch`'s `events.jsonl` when it exists, and every `sync.poll_seconds`. |
 | **Work a task.** A popup lists the claimable tasks of the workspace's corpus, filtered as you type. The one you pick gets a worktree on `task/<short id>` cut from the default branch, a tab with `ANK_AGENT=<user>@<host>/ank-<short id>`, an agent of kind `agent.kind`, and the prompt `ank claim <id>`. If somebody else holds the task, you are notified and the worktree is kept. | The action *Work a task* in the command palette, or `herdr plugin action invoke work --plugin ank`. |
 | **ank tui.** `ank tui` over the corpus of the current workspace, as an overlay; `q` closes it. | `herdr plugin pane open --plugin ank --entrypoint tui`. |
 | **Notifications.** A task held by an agent pane is done (“TASK-xxxx terminée par ank-xxxx”), a claim has less than `notify.expiring_minutes` left (once per claim), the ratification queue grew (“N décisions en attente”, then `ank review`). | The daemon, between two syncs. |
@@ -65,6 +65,23 @@ A claim is attributed to the pane whose herdr agent name ends its identity:
 `…/ank-6da1` goes to the agent named `ank-6da1`. Renaming the agent breaks
 that link. Every report expires after 90 s, so a stopped daemon empties the
 sidebar instead of showing a stale claim.
+
+## Daemon lifecycle
+
+One `herdr-ank daemon` runs per herdr server, holding a lock in the plugin's
+state directory. herdr has no supervisor for plugin processes, so the manifest
+is the supervisor:
+
+- `[[startup]]` launches it when herdr restores a session;
+- `[[events]]` launch it again on `workspace.created`, `tab.created`,
+  `pane.agent_detected` and `worktree.opened`. While a daemon holds the lock,
+  each of these launches exits 0 at once and writes nothing.
+
+So after `herdr plugin link`, the daemon starts with the first of those
+events (opening a tab is enough), and if it dies, the next one brings it
+back. Between the two, the sidebar tokens expire on their own after 90 s;
+nothing else depends on the daemon being alive. `pgrep -af 'herdr-ank daemon'`
+shows it, and `herdr plugin log list --plugin ank` holds its line per sync.
 
 ## Configuration
 

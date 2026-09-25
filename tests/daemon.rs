@@ -179,3 +179,60 @@ fn a_bare_identity_claim_leaves_the_queue_counted() {
     assert_eq!(tokens.get("ank_task"), Some(&"TASK-416c"));
     assert_eq!(tokens.get("ank_queue"), Some(&"3"));
 }
+
+/// Runs `herdr-ank daemon` as an `[[events]]` hook would (ADR-6fb76f3a1197).
+fn daemon_from_event(state_dir: &std::path::Path, event: &str) -> std::process::Child {
+    Command::new(env!("CARGO_BIN_EXE_herdr-ank"))
+        .arg("daemon")
+        .env("HERDR_PLUGIN_EVENT", event)
+        .env("HERDR_PLUGIN_STATE_DIR", state_dir)
+        .env("HERDR_PLUGIN_CONFIG_DIR", state_dir)
+        .env("HERDR_BIN_PATH", "/nonexistent/herdr")
+        .env("HERDR_SOCKET_PATH", state_dir.join("absent.sock"))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap()
+}
+
+#[test]
+fn an_event_hook_finding_the_lock_held_exits_zero_and_says_nothing() {
+    let dir = tempdir("event-held");
+    let _held = Lock::acquire(&dir).unwrap().unwrap();
+
+    let mut child = daemon_from_event(&dir, "tab.created");
+    let started = Instant::now();
+    while child.try_wait().unwrap().is_none() {
+        if started.elapsed() > Duration::from_secs(5) {
+            child.kill().unwrap();
+            panic!("the hook did not exit while the lock was held");
+        }
+        std::thread::sleep(ms(20));
+    }
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success(), "{}", output.status);
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+    assert_eq!(String::from_utf8_lossy(&output.stderr), "");
+}
+
+#[test]
+fn an_event_hook_finding_the_lock_free_becomes_the_daemon() {
+    let dir = tempdir("event-free");
+
+    let mut child = daemon_from_event(&dir, "tab.created");
+    let started = Instant::now();
+    let held = loop {
+        if Lock::acquire(&dir).unwrap().is_none() {
+            break true;
+        }
+        if child.try_wait().unwrap().is_some() || started.elapsed() > Duration::from_secs(5) {
+            break false;
+        }
+        std::thread::sleep(ms(20));
+    };
+    let alive = child.try_wait().unwrap().is_none();
+    let _ = child.kill();
+    let _ = child.wait();
+    assert!(held, "the hook never took the lock");
+    assert!(alive, "the hook exited instead of staying as the daemon");
+}

@@ -154,7 +154,8 @@ pub fn run() -> Result<(), String> {
     let Some(_lock) =
         Lock::acquire(&state_dir).map_err(|e| format!("herdr-ank daemon: lock: {e}"))?
     else {
-        eprintln!("herdr-ank daemon: another instance holds the lock, exiting");
+        // Every [[events]] hook lands here while the daemon lives
+        // (ADR-6fb76f3a1197): exit 0 and leave the plugin log alone.
         return Ok(());
     };
     let config = Config::load(&env_path("HERDR_PLUGIN_CONFIG_DIR")?).map_err(|e| e.to_string())?;

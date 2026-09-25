@@ -28,3 +28,21 @@ command = ["./target/release/herdr-ank", "tui"]
 
 [[startup]]
 command = ["./target/release/herdr-ank", "daemon"]
+
+# The [[events]] below are the daemon's supervisor (ADR-6fb76f3a1197): each
+# launches `herdr-ank daemon`, which exits 0 at once while one already runs.
+[[events]]
+on = "workspace.created"
+command = ["./target/release/herdr-ank", "daemon"]
+
+[[events]]
+on = "tab.created"
+command = ["./target/release/herdr-ank", "daemon"]
+
+[[events]]
+on = "pane.agent_detected"
+command = ["./target/release/herdr-ank", "daemon"]
+
+[[events]]
+on = "worktree.opened"
+command = ["./target/release/herdr-ank", "daemon"]
