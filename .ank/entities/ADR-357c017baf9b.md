@@ -5,13 +5,17 @@ slug: le-plugin-commande-herdr-par-la-cli-herdr-bin-pa
 title: Le plugin commande herdr par la CLI $HERDR_BIN_PATH et n'utilise le socket que pour events.subscribe
 created: 2026-09-25T16:52:33Z
 author: haksolot@omarchy
-status: proposed
+status: accepted
 scope:
   - src/**
 constraint: |
   Toute action sur herdr (report-metadata, notification show, worktree create, tab create, agent start, agent prompt, plugin pane open) passe par le binaire $HERDR_BIN_PATH avec --json quand la sous-commande l'offre. Le socket $HERDR_SOCKET_PATH est ouvert pour une seule méthode, events.subscribe, lue en NDJSON. Les champs inconnus d'une réponse sont ignorés et une méthode non supportée est une erreur ordinaire, jamais un panic.
+ratified: b54874323e3f
+verified:
+  - by: haksolot@omarchy
+    at: 2026-09-25T17:11:52Z
 schema: 4
-version: 1
+version: 2
 ---
 
 La documentation des plugins herdr désigne la CLI comme surface première
