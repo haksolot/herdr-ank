@@ -3,10 +3,19 @@ name = "Ank"
 version = "0.1.0"
 min_herdr_version = "0.9.1"
 description = "Ank tasks, claims and decisions in herdr"
+platforms = ["linux", "macos", "windows"]
+
+# One [[build]] per platform family (ADR-599b6f424271). The entries below name
+# ./bin/herdr-ank on every platform: on Windows herdr resolves it to
+# herdr-ank.exe, through std's Command for actions, startup and events and
+# through PATHEXT for panes.
+[[build]]
+command = ["sh", "install.sh"]
 platforms = ["linux", "macos"]
 
 [[build]]
-command = ["sh", "install.sh"]
+command = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "install.ps1"]
+platforms = ["windows"]
 
 [[actions]]
 id = "work"

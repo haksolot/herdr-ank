@@ -237,11 +237,35 @@ fn an_unknown_target_is_named() {
 #[test]
 fn the_manifest_builds_with_install_sh_and_runs_bin_herdr_ank() {
     let manifest = manifest();
+    assert_eq!(
+        manifest["platforms"],
+        toml::Value::try_from(["linux", "macos", "windows"]).unwrap()
+    );
     let build = manifest["build"].as_array().unwrap();
-    assert_eq!(build.len(), 1);
+    assert_eq!(build.len(), 2);
     assert_eq!(
         build[0]["command"],
         toml::Value::try_from(["sh", "install.sh"]).unwrap()
+    );
+    assert_eq!(
+        build[0]["platforms"],
+        toml::Value::try_from(["linux", "macos"]).unwrap()
+    );
+    assert_eq!(
+        build[1]["command"],
+        toml::Value::try_from([
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            "install.ps1"
+        ])
+        .unwrap()
+    );
+    assert_eq!(
+        build[1]["platforms"],
+        toml::Value::try_from(["windows"]).unwrap()
     );
     let mut commands = 0;
     for table in ["actions", "panes", "startup", "events", "link_handlers"] {

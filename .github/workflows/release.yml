@@ -1,4 +1,4 @@
-# Publishes the prebuilt binaries install.sh downloads (ADR-599b6f424271).
+# Publishes the prebuilt binaries install.sh and install.ps1 download (ADR-599b6f424271).
 # Triggered only by a tag the human pushes; nothing here creates a tag.
 name: release
 
@@ -38,16 +38,26 @@ jobs:
         include:
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
+            archive: tar.gz
           - target: aarch64-unknown-linux-musl
             os: ubuntu-24.04-arm
+            archive: tar.gz
           - target: x86_64-apple-darwin
             os: macos-latest
+            archive: tar.gz
           - target: aarch64-apple-darwin
             os: macos-latest
+            archive: tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
     runs-on: ${{ matrix.os }}
     env:
       VERSION: ${{ needs.version.outputs.version }}
       TARGET: ${{ matrix.target }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - if: runner.os == 'Linux'
@@ -55,11 +65,19 @@ jobs:
       - run: |
           rustup toolchain install stable --profile minimal --target "$TARGET"
           cargo +stable build --release --locked --target "$TARGET"
-      - run: tar -czf "herdr-ank-${VERSION}-${TARGET}.tar.gz" -C "target/${TARGET}/release" herdr-ank
+      - if: runner.os != 'Windows'
+        run: tar -czf "herdr-ank-${VERSION}-${TARGET}.tar.gz" -C "target/${TARGET}/release" herdr-ank
+      # install.ps1 unpacks with Expand-Archive, so the Windows archive is a zip
+      # holding herdr-ank.exe at its root.
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          Compress-Archive -LiteralPath "target/$env:TARGET/release/herdr-ank.exe"
+          -DestinationPath "herdr-ank-$env:VERSION-$env:TARGET.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
-          path: herdr-ank-${{ env.VERSION }}-${{ matrix.target }}.tar.gz
+          path: herdr-ank-${{ env.VERSION }}-${{ matrix.target }}.${{ matrix.archive }}
           if-no-files-found: error
 
   release:
@@ -78,8 +96,8 @@ jobs:
       - working-directory: dist
         run: |
           set -eu
-          set -- *.tar.gz
-          test "$#" -eq 4
+          set -- *.tar.gz *.zip
+          test "$#" -eq 5
           sha256sum -- "$@" > SHA256SUMS
           gh release create "v${VERSION}" --repo "$GITHUB_REPOSITORY" --verify-tag \
             --title "v${VERSION}" -- "$@" SHA256SUMS
