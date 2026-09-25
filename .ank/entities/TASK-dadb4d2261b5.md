@@ -5,7 +5,7 @@ slug: client-ank-ank-verbe-json-typ-contrat-v-rifi-cod
 title: "Client ank : ank <verbe> --json typé, contrat vérifié, codes de sortie routés"
 created: 2026-09-25T16:54:18Z
 author: haksolot@omarchy
-status: open
+status: done
 scope:
   - src/ank/**
   - tests/ank_client.rs
@@ -16,8 +16,27 @@ done_criteria: |
 criteria_by: creator
 verify: [cargo-test, clippy, fmt-check]
 method: tdd
+proof:
+  - type: test
+    ref: local/54e6e233928e@97899fd
+    tree: scope/cbfc7a5b1534
+    criteria: 128c6ab97650
+    verifier: cargo-test@f14aeab36e1b
+    via: verifier
+  - type: test
+    ref: local/e3b0c44298fc@97899fd
+    tree: scope/cbfc7a5b1534
+    criteria: 128c6ab97650
+    verifier: clippy@d335c02ef52c
+    via: verifier
+  - type: test
+    ref: local/e3b0c44298fc@97899fd
+    tree: scope/cbfc7a5b1534
+    criteria: 128c6ab97650
+    verifier: fmt-check@5ca6d10bcd55
+    via: verifier
 schema: 4
-version: 1
+version: 3
 ---
 
 La frontière avec ank (ADR-3cd19cd6acb9). Tout ce que le plugin sait d'un corpus passe

@@ -6,6 +6,8 @@ description = "herdr plugin integrating the ank task and decision corpus"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 toml = { version = "0.8", default-features = false, features = ["parse"] }
 
 [dev-dependencies]
