@@ -1,0 +1,28 @@
+schema: 1
+context_budget: 8000
+claim_ttl_max: 2h
+verifiers:
+  cargo-test:
+    run: cargo test --workspace -q
+    timeout: 10m
+    default: true
+  clippy:
+    run: cargo clippy --workspace --all-targets -q -- -D warnings
+    timeout: 5m
+    default: true
+  fmt-check:
+    run: cargo fmt --check
+    timeout: 2m
+    default: true
+roles:
+  agent:
+    can: [context, find, claim, log, done, new:task, new:adr:proposed]
+    cannot: [adr:accept, adr:edit-constraint, task:close, delete]
+  human:
+    can: ["*"]
+identities: {}
+weight:
+  hot_files: 3000
+  plane_bytes: 4000000
+default_branch: main
+claim_ttl_default: 1h
