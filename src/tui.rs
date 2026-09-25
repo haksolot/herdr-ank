@@ -3,7 +3,7 @@
 
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::process::ExitCode;
 
 use serde::Deserialize;
 
@@ -53,20 +53,12 @@ pub fn run() -> ExitCode {
         eprintln!("{}", not_found(&start));
         return ExitCode::from(1);
     };
-    let err = ank_tui(&repo).exec();
+    let err = crate::ank::tui_command(&repo).exec();
     eprintln!(
         "herdr-ank tui: cannot run `ank tui` in {}: {err}",
         repo.display()
     );
     ExitCode::from(1)
-}
-
-/// Not `--repo`: ank 0.8.0's TUI passes it to its child calls before the verb,
-/// where the CLI rejects it (haksolot/ank#495).
-fn ank_tui(repo: &Path) -> Command {
-    let mut command = Command::new("ank");
-    command.arg("tui").current_dir(repo);
-    command
 }
 
 fn not_found(start: &Path) -> String {
@@ -121,15 +113,6 @@ mod tests {
         fs::write(root.path().join("a/.ank"), "").unwrap();
 
         assert_eq!(find_corpus(&dir), None);
-    }
-
-    #[test]
-    fn ank_tui_runs_in_the_corpus_without_repo_flag() {
-        let command = ank_tui(Path::new("/home/me/repo"));
-        assert_eq!(command.get_program(), "ank");
-        let args: Vec<_> = command.get_args().collect();
-        assert_eq!(args, ["tui"]);
-        assert_eq!(command.get_current_dir(), Some(Path::new("/home/me/repo")));
     }
 
     #[test]

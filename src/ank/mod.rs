@@ -106,6 +106,17 @@ impl Client {
     }
 }
 
+/// `ank tui` for the human at the pane: run with the corpus as its cwd, and
+/// not `--repo`, which ank 0.8.0's TUI passes to its child calls before the
+/// verb, where the CLI rejects it (haksolot/ank#495). The environment is left
+/// as the user has it, `ANK_AGENT` included: what they claim from the TUI is
+/// theirs.
+pub fn tui_command(repo: &Path) -> Command {
+    let mut command = Command::new("ank");
+    command.arg("tui").current_dir(repo);
+    command
+}
+
 /// What an exit code means, as ank's exit-code reference names it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExitKind {

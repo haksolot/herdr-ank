@@ -258,3 +258,13 @@ fn new_runs_the_ank_on_the_path() {
         Path::new("ank")
     );
 }
+
+#[test]
+fn the_tui_command_runs_in_the_corpus_without_repo_and_keeps_the_users_identity() {
+    let command = herdr_ank::ank::tui_command(Path::new("/src/repo"));
+    assert_eq!(command.get_program(), "ank");
+    assert_eq!(command.get_args().collect::<Vec<_>>(), ["tui"]);
+    assert_eq!(command.get_current_dir(), Some(Path::new("/src/repo")));
+    // Nothing set or removed: the TUI is the human's, under the human's ANK_AGENT.
+    assert_eq!(command.get_envs().count(), 0);
+}
