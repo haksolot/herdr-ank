@@ -1,4 +1,4 @@
-//! The daemon's single instance and its coalescing (TASK-91a1, ADR-c8e7e56e5219).
+//! The daemon's single instance and its coalescing (TASK-91a1, ADR-6fb76f3a1197).
 
 use std::fs;
 use std::path::PathBuf;

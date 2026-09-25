@@ -84,7 +84,7 @@ plugin with an error naming that key.
 | `notify.review`           | boolean          | `true`     | notify when decisions are waiting to be ratified         |
 
 `sync.poll_seconds` cannot exceed 30. The synchronisation ADR
-(ADR-c8e7e56e5219) requires a sync at least every 30 seconds, and the sidebar
+(ADR-6fb76f3a1197) requires a sync at least every 30 seconds, and the sidebar
 tokens are reported with a 90-second ttl (SPEC-dbe3cf972f71), three times that
 maximum: a slower poll would let the tokens expire between two syncs and empty
 the sidebar.

@@ -1,4 +1,4 @@
-//! The `[[startup]]` process (ADR-c8e7e56e5219): one instance per herdr,
+//! The `[[startup]]` process (ADR-6fb76f3a1197): one instance per herdr,
 //! a sync at start, then one per burst of herdr events or `events.jsonl`
 //! lines, at most one a second and at least one every `sync.poll_seconds`.
 //!
@@ -23,7 +23,7 @@ use crate::sync::{self, Corpus};
 
 const LOCK_FILE: &str = "daemon.lock";
 
-/// Syncs are coalesced to one per this gap (ADR-c8e7e56e5219).
+/// Syncs are coalesced to one per this gap (ADR-6fb76f3a1197).
 const MIN_GAP: Duration = Duration::from_secs(1);
 
 /// The backoff after losing herdr's socket grows to this and stays there.
@@ -32,7 +32,7 @@ const MAX_BACKOFF: Duration = Duration::from_secs(30);
 /// How often `events.jsonl` is looked at.
 const TAIL_EVERY: Duration = Duration::from_secs(1);
 
-/// The kinds ADR-c8e7e56e5219 lists that herdr accepts without a pane.
+/// The kinds ADR-6fb76f3a1197 lists that herdr accepts without a pane.
 const KINDS: [&str; 7] = [
     "pane.created",
     "pane.closed",
