@@ -5,7 +5,7 @@ slug: squelette-crate-herdr-ank-et-herdr-plugin-toml-q
 title: "Squelette : crate herdr-ank et herdr-plugin.toml que herdr plugin link accepte"
 created: 2026-09-25T16:54:17Z
 author: haksolot@omarchy
-status: open
+status: done
 scope:
   - Cargo.toml
   - herdr-plugin.toml
@@ -16,8 +16,27 @@ done_criteria: |
   `cargo build --release` produit `target/release/herdr-ank` ; `herdr-ank --version` imprime la version du Cargo.toml. `herdr-plugin.toml` à la racine déclare id `ank`, name, version, min_herdr_version `0.9.1`, platforms `["linux","macos"]`, un `[[build]]` `cargo build --release` ; `herdr plugin link .` réussit et `herdr plugin list --json` liste `ank` avec `enabled: true`.
 criteria_by: creator
 verify: [cargo-test, clippy, fmt-check]
+proof:
+  - type: test
+    ref: local/df166913f47f@c666a0f
+    tree: scope/dac3d25d04ac
+    criteria: 86d979aa0926
+    verifier: cargo-test@f14aeab36e1b
+    via: verifier
+  - type: test
+    ref: local/e3b0c44298fc@c666a0f
+    tree: scope/dac3d25d04ac
+    criteria: 86d979aa0926
+    verifier: clippy@d335c02ef52c
+    via: verifier
+  - type: test
+    ref: local/e3b0c44298fc@c666a0f
+    tree: scope/dac3d25d04ac
+    criteria: 86d979aa0926
+    verifier: fmt-check@5ca6d10bcd55
+    via: verifier
 schema: 4
-version: 1
+version: 3
 ---
 
 Première brique, sans fonction : le plugin existe pour herdr et le binaire

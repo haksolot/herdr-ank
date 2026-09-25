@@ -1,0 +1,9 @@
+id = "ank"
+name = "Ank"
+version = "0.1.0"
+min_herdr_version = "0.9.1"
+description = "Ank tasks, claims and decisions in herdr"
+platforms = ["linux", "macos"]
+
+[[build]]
+command = ["cargo", "build", "--release"]
