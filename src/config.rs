@@ -11,6 +11,10 @@ use toml::{Table, Value};
 
 pub const FILE_NAME: &str = "config.toml";
 
+/// ADR-c8e7e56e5219 wants a sync at least every 30 s, and the sidebar tokens'
+/// 90 s ttl (SPEC-dbe3cf972f71) is three times that maximum.
+pub const MAX_POLL_SECONDS: u64 = 30;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
     pub agent: AgentConfig,
@@ -64,6 +68,12 @@ pub enum Error {
         path: PathBuf,
         message: String,
     },
+    /// A well-typed value outside the range the key allows.
+    Range {
+        key: String,
+        min: u64,
+        max: u64,
+    },
     /// `key` is dotted from the root, e.g. `sync.poll_seconds`.
     Type {
         key: String,
@@ -76,6 +86,9 @@ impl fmt::Display for Error {
         match self {
             Error::Read { path, source } => write!(f, "{}: {source}", path.display()),
             Error::Parse { path, message } => write!(f, "{}: {message}", path.display()),
+            Error::Range { key, min, max } => {
+                write!(f, "config key `{key}`: must be between {min} and {max}")
+            }
             Error::Type { key, expected } => write!(f, "config key `{key}`: expected {expected}"),
         }
     }
@@ -112,7 +125,7 @@ impl Config {
         }
         if let Some(sync) = table(root, "sync")? {
             if let Some(v) = sync.get("poll_seconds") {
-                config.sync.poll_seconds = unsigned(v, "sync.poll_seconds")?;
+                config.sync.poll_seconds = bounded(v, "sync.poll_seconds", 1, MAX_POLL_SECONDS)?;
             }
         }
         if let Some(notify) = table(root, "notify")? {
@@ -166,6 +179,19 @@ fn unsigned(v: &Value, key: &str) -> Result<u64, Error> {
     v.as_integer()
         .and_then(|i| u64::try_from(i).ok())
         .ok_or_else(|| mistyped(key, "a non-negative integer"))
+}
+
+fn bounded(v: &Value, key: &str, min: u64, max: u64) -> Result<u64, Error> {
+    let n = unsigned(v, key)?;
+    if (min..=max).contains(&n) {
+        Ok(n)
+    } else {
+        Err(Error::Range {
+            key: key.to_owned(),
+            min,
+            max,
+        })
+    }
 }
 
 fn boolean(v: &Value, key: &str) -> Result<bool, Error> {
