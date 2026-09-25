@@ -28,10 +28,13 @@ fn powershell() -> PathBuf {
     system_root().join(r"System32\WindowsPowerShell\v1.0\powershell.exe")
 }
 
-/// Runs a PowerShell snippet for the test's own setup, and asserts it succeeds.
+/// Runs a PowerShell snippet for the test's own setup, and asserts it succeeds:
+/// any error stops it, since `-Command` exits 0 when only an earlier statement
+/// failed.
 fn ps(script: &str) {
+    let script = format!("$ErrorActionPreference = 'Stop'; {script}");
     let out = Command::new(powershell())
-        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
         .output()
         .unwrap();
     assert!(
@@ -78,16 +81,20 @@ impl Case {
         fs::create_dir_all(&staging).unwrap();
         fs::write(staging.join("herdr-ank.exe"), BINARY).unwrap();
         ps(&format!(
-            "Compress-Archive -LiteralPath '{}' -DestinationPath '{}'",
-            staging.join("herdr-ank.exe").display(),
+            "Add-Type -AssemblyName System.IO.Compression.FileSystem; \
+             [IO.Compression.ZipFile]::CreateFromDirectory('{}', '{}')",
+            staging.display(),
             self.release.join(self.asset()).display()
         ));
     }
 
-    /// Writes SHA256SUMS the way sha256sum does, with the archive's true sum.
+    /// Writes SHA256SUMS the way sha256sum does, with the archive's true sum,
+    /// computed by .NET rather than by the Get-FileHash under test.
     fn publish_sums(&self) {
         ps(&format!(
-            "$h = (Get-FileHash -Algorithm SHA256 -LiteralPath '{}').Hash.ToLower(); \
+            "$sha = [Security.Cryptography.SHA256]::Create(); \
+             $bytes = $sha.ComputeHash([IO.File]::ReadAllBytes('{}')); \
+             $h = ([BitConverter]::ToString($bytes) -replace '-', '').ToLower(); \
              [IO.File]::WriteAllText('{}', $h + '  {}' + [char]10)",
             self.release.join(self.asset()).display(),
             self.release.join("SHA256SUMS").display(),
