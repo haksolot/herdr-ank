@@ -1,5 +1,5 @@
 //! `herdr-ank tui`: find the corpus of the workspace herdr opened the pane
-//! from, then become `ank tui --repo <it>`.
+//! from, then become `ank tui` with it as cwd.
 
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -39,7 +39,7 @@ pub fn find_corpus(start: &Path) -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
-/// Replaces this process with `ank tui --repo <corpus>`. Returns only on
+/// Replaces this process with `ank tui` run in the corpus. Returns only on
 /// failure, after saying why on stderr, so herdr closes the pane at once.
 pub fn run() -> ExitCode {
     let context = std::env::var("HERDR_PLUGIN_CONTEXT_JSON").unwrap_or_default();
@@ -53,16 +53,20 @@ pub fn run() -> ExitCode {
         eprintln!("{}", not_found(&start));
         return ExitCode::from(1);
     };
-    let err = Command::new("ank")
-        .arg("tui")
-        .arg("--repo")
-        .arg(&repo)
-        .exec();
+    let err = ank_tui(&repo).exec();
     eprintln!(
-        "herdr-ank tui: cannot run `ank tui --repo {}`: {err}",
+        "herdr-ank tui: cannot run `ank tui` in {}: {err}",
         repo.display()
     );
     ExitCode::from(1)
+}
+
+/// Not `--repo`: ank 0.8.0's TUI passes it to its child calls before the verb,
+/// where the CLI rejects it (haksolot/ank#495).
+fn ank_tui(repo: &Path) -> Command {
+    let mut command = Command::new("ank");
+    command.arg("tui").current_dir(repo);
+    command
 }
 
 fn not_found(start: &Path) -> String {
@@ -117,6 +121,15 @@ mod tests {
         fs::write(root.path().join("a/.ank"), "").unwrap();
 
         assert_eq!(find_corpus(&dir), None);
+    }
+
+    #[test]
+    fn ank_tui_runs_in_the_corpus_without_repo_flag() {
+        let command = ank_tui(Path::new("/home/me/repo"));
+        assert_eq!(command.get_program(), "ank");
+        let args: Vec<_> = command.get_args().collect();
+        assert_eq!(args, ["tui"]);
+        assert_eq!(command.get_current_dir(), Some(Path::new("/home/me/repo")));
     }
 
     #[test]
