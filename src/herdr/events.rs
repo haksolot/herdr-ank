@@ -3,6 +3,7 @@
 
 use std::io::{BufRead, BufReader, Lines, Write};
 use std::os::unix::net::UnixStream;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -37,8 +38,6 @@ impl Subscription {
 }
 
 /// The events this plugin reads. Any other kind is skipped by the stream.
-/// Variants are named after herdr's event kinds, hence the shared prefix.
-#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     PaneCreated(Pane),
@@ -52,6 +51,28 @@ pub enum Event {
         workspace_id: String,
         agent: Option<String>,
         agent_status: String,
+    },
+    PaneAgentDetected {
+        pane_id: String,
+        workspace_id: String,
+        agent: Option<String>,
+    },
+    WorktreeCreated {
+        workspace_id: String,
+        path: PathBuf,
+        branch: Option<String>,
+    },
+    WorktreeOpened {
+        workspace_id: String,
+        path: PathBuf,
+        branch: Option<String>,
+    },
+    WorktreeRemoved {
+        workspace_id: String,
+        path: PathBuf,
+    },
+    WorkspaceClosed {
+        workspace_id: String,
     },
 }
 
@@ -98,6 +119,40 @@ struct StatusChanged {
     #[serde(default)]
     agent: Option<String>,
     agent_status: String,
+}
+
+#[derive(Deserialize)]
+struct AgentDetected {
+    pane_id: String,
+    workspace_id: String,
+    #[serde(default)]
+    agent: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct WorkspaceRef {
+    workspace_id: String,
+}
+
+#[derive(Deserialize)]
+struct WorktreeRef {
+    path: PathBuf,
+    #[serde(default)]
+    branch: Option<String>,
+}
+
+/// `worktree_created` and `worktree_opened`: the workspace is whole.
+#[derive(Deserialize)]
+struct WorktreeInWorkspace {
+    workspace: WorkspaceRef,
+    worktree: WorktreeRef,
+}
+
+/// `worktree_removed`: the workspace may be gone, its id stays.
+#[derive(Deserialize)]
+struct WorktreeGone {
+    workspace_id: String,
+    worktree: WorktreeRef,
 }
 
 impl Client {
@@ -191,6 +246,28 @@ fn decode(kind: &str, data: Value) -> Option<Event> {
                 agent_status: d.agent_status,
             })
         }
+        "pane_agent_detected" => from::<AgentDetected>(data).map(|d| Event::PaneAgentDetected {
+            pane_id: d.pane_id,
+            workspace_id: d.workspace_id,
+            agent: d.agent,
+        }),
+        "worktree_created" => from::<WorktreeInWorkspace>(data).map(|d| Event::WorktreeCreated {
+            workspace_id: d.workspace.workspace_id,
+            path: d.worktree.path,
+            branch: d.worktree.branch,
+        }),
+        "worktree_opened" => from::<WorktreeInWorkspace>(data).map(|d| Event::WorktreeOpened {
+            workspace_id: d.workspace.workspace_id,
+            path: d.worktree.path,
+            branch: d.worktree.branch,
+        }),
+        "worktree_removed" => from::<WorktreeGone>(data).map(|d| Event::WorktreeRemoved {
+            workspace_id: d.workspace_id,
+            path: d.worktree.path,
+        }),
+        "workspace_closed" => from::<WorkspaceRef>(data).map(|d| Event::WorkspaceClosed {
+            workspace_id: d.workspace_id,
+        }),
         _ => None,
     }
 }

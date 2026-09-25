@@ -1,0 +1,7 @@
+{"id":"herdr-ank:subscribe","result":{"type":"subscription_started"}}
+{"event":"pane_agent_detected","data":{"type":"pane_agent_detected","pane_id":"wN:p5","workspace_id":"wN","agent":"claude","final_status":null,"released":false}}
+{"event":"worktree_created","data":{"type":"worktree_created","workspace":{"workspace_id":"wN","number":2,"label":"herdr-ank","focused":false,"pane_count":3,"tab_count":2,"active_tab_id":"wN:t2","agent_status":"working"},"worktree":{"path":"/wt/task-91a1","branch":"task/91a1","is_bare":false,"is_detached":false,"is_prunable":false,"is_linked_worktree":true,"label":"task-91a1"}}}
+{"event":"worktree_opened","data":{"type":"worktree_opened","already_open":true,"workspace":{"workspace_id":"wN","number":2,"label":"herdr-ank","focused":true,"pane_count":3,"tab_count":2,"active_tab_id":"wN:t2","agent_status":null},"worktree":{"path":"/wt/task-91a1","branch":"task/91a1","is_bare":false,"is_detached":false,"is_prunable":false,"is_linked_worktree":true,"label":"task-91a1"}}}
+{"event":"pane_moved_to_the_moon","data":{"type":"pane_moved_to_the_moon","pane_id":"wN:p5"}}
+{"event":"worktree_removed","data":{"type":"worktree_removed","workspace_id":"wN","workspace":null,"forced":false,"worktree":{"path":"/wt/task-91a1","branch":null,"is_bare":false,"is_detached":false,"is_prunable":true,"is_linked_worktree":true,"label":"task-91a1"}}}
+{"event":"workspace_closed","data":{"type":"workspace_closed","workspace_id":"wN","workspace":null}}

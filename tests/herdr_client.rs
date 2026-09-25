@@ -577,3 +577,41 @@ fn plugin_pane_open_refused_is_an_api_error() {
         other => panic!("expected an Api error, got {other:?}"),
     }
 }
+
+#[test]
+fn subscribe_decodes_the_lifecycle_events_the_daemon_wakes_on() {
+    let (client, server) = serve("subscribe-lifecycle", "lifecycle_events.ndjson");
+    let events: Vec<Event> = client
+        .subscribe(&[Subscription::new("worktree.created")])
+        .unwrap()
+        .collect();
+    server.join().unwrap();
+
+    assert_eq!(
+        events,
+        [
+            Event::PaneAgentDetected {
+                pane_id: "wN:p5".into(),
+                workspace_id: "wN".into(),
+                agent: Some("claude".into()),
+            },
+            Event::WorktreeCreated {
+                workspace_id: "wN".into(),
+                path: PathBuf::from("/wt/task-91a1"),
+                branch: Some("task/91a1".into()),
+            },
+            Event::WorktreeOpened {
+                workspace_id: "wN".into(),
+                path: PathBuf::from("/wt/task-91a1"),
+                branch: Some("task/91a1".into()),
+            },
+            Event::WorktreeRemoved {
+                workspace_id: "wN".into(),
+                path: PathBuf::from("/wt/task-91a1"),
+            },
+            Event::WorkspaceClosed {
+                workspace_id: "wN".into(),
+            },
+        ]
+    );
+}
