@@ -5,7 +5,7 @@ slug: le-plugin-se-distribue-en-binaire-pr-compil-par
 title: Le plugin se distribue en binaire précompilé par release GitHub ; [[build]] est un script d'amorçage, cargo en repli
 created: 2026-09-25T18:37:48Z
 author: haksolot@omarchy
-status: proposed
+status: accepted
 scope:
   - herdr-plugin.toml
   - install.sh
@@ -14,8 +14,12 @@ scope:
 constraint: |
   Le plugin reste un seul binaire Rust, herdr-ank, et toute entrée du manifeste autre que [[build]] (startup, actions, panes, events, link_handlers) invoque ./bin/herdr-ank ou ank tui à travers lui. [[build]] est l'unique script du manifeste : install.sh, POSIX sh, qui lit la version du manifeste, télécharge depuis la release GitHub v<version> l'archive de sa plateforme (linux et macos, x86_64 et aarch64, linux en musl), vérifie sa somme dans SHA256SUMS, pose le binaire dans ./bin/herdr-ank, et ne se rabat sur cargo build --release que si le téléchargement ou la vérification échoue et que cargo est présent ; sinon il sort 1 en nommant ce qui manque. Les binaires sont produits par un workflow GitHub Actions déclenché par le tag v<version>, qui refuse un tag dont la version diffère de Cargo.toml ou du manifeste. Windows n'est pas déclaré tant que le socket nommé n'est pas couvert.
 supersedes: ADR-aca6aaeb3a5f
+ratified: 0bc9ddbd41d5
+verified:
+  - by: haksolot@omarchy
+    at: 2026-09-25T18:37:50Z
 schema: 4
-version: 1
+version: 2
 ---
 
 Remplace ADR-aca6aaeb3a5f sur la distribution ; le reste de sa décision tient : un
