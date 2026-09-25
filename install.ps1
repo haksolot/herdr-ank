@@ -17,6 +17,17 @@ $ProgressPreference = 'SilentlyContinue'
 
 Set-Location -LiteralPath $PSScriptRoot
 
+# Get-FileHash and Expand-Archive live in modules, not in the engine, and
+# their autoload goes through an inherited PSModulePath: from a herdr started in
+# PowerShell 7 that path lists pwsh's modules, and 5.1 finds no Get-FileHash
+# (measured on the CI's windows job). The modules 5.1 ships beside itself are
+# loaded by path.
+if ($PSVersionTable.PSVersion.Major -le 5) {
+    foreach ($module in 'Microsoft.PowerShell.Utility', 'Microsoft.PowerShell.Archive') {
+        Import-Module -Force (Join-Path $PSHOME "Modules\$module")
+    }
+}
+
 function Fail([string]$Message) {
     [Console]::Error.WriteLine("herdr-ank: $Message")
 }
