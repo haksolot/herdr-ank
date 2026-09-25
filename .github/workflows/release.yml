@@ -1,0 +1,85 @@
+# Publishes the prebuilt binaries install.sh downloads (ADR-7aab39e2dbd8).
+# Triggered only by a tag the human pushes; nothing here creates a tag.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          want="${TAG#v}"
+          cargo=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
+          manifest=$(sed -n 's/^version = "\(.*\)"$/\1/p' herdr-plugin.toml | head -n 1)
+          if [ "$want" != "$cargo" ] || [ "$want" != "$manifest" ]; then
+            echo "::error::tag $TAG does not match Cargo.toml ($cargo) and herdr-plugin.toml ($manifest)"
+            exit 1
+          fi
+          echo "version=$want" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04-arm
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+    runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v4
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - run: |
+          rustup toolchain install stable --profile minimal --target "$TARGET"
+          cargo +stable build --release --locked --target "$TARGET"
+      - run: tar -czf "herdr-ank-${VERSION}-${TARGET}.tar.gz" -C "target/${TARGET}/release" herdr-ank
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: herdr-ank-${{ env.VERSION }}-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - working-directory: dist
+        run: |
+          set -eu
+          set -- *.tar.gz
+          test "$#" -eq 4
+          sha256sum -- "$@" > SHA256SUMS
+          gh release create "v${VERSION}" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "v${VERSION}" -- "$@" SHA256SUMS
