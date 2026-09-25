@@ -14,7 +14,7 @@ done_criteria: |
 criteria_by: creator
 verify: [cargo-test, clippy, fmt-check]
 schema: 4
-version: 1
+version: 3
 ---
 
 C'est la question de départ : un utilisateur sans toolchain Rust peut-il
