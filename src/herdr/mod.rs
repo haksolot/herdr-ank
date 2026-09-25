@@ -20,8 +20,11 @@ use serde::Deserialize;
 
 pub use events::{Event, Subscription};
 
-/// The `--source` under which the plugin reports pane metadata: the plugin id.
-pub const SOURCE: &str = "ank";
+/// The plugin id, as `herdr-plugin.toml` declares it.
+pub const PLUGIN_ID: &str = "ank";
+
+/// The `--source` of every pane metadata report (SPEC-dbe3cf972f71).
+pub const METADATA_SOURCE: &str = "ank:sync";
 
 #[derive(Debug)]
 pub enum HerdrError {
@@ -227,7 +230,7 @@ impl Client {
         clear: &[&str],
         ttl_ms: Option<u64>,
     ) -> Result<(), HerdrError> {
-        let mut args = argv(["pane", "report-metadata", pane, "--source", SOURCE]);
+        let mut args = argv(["pane", "report-metadata", pane, "--source", METADATA_SOURCE]);
         for (name, value) in tokens {
             args.push("--token".into());
             args.push(format!("{name}={value}").into());
@@ -321,7 +324,7 @@ impl Client {
             "pane",
             "open",
             "--plugin",
-            SOURCE,
+            PLUGIN_ID,
             "--entrypoint",
             entrypoint,
         ]);

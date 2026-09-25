@@ -176,7 +176,7 @@ fn report_metadata_sets_and_clears_tokens_under_the_plugin_source() {
             "report-metadata",
             "w1:p2",
             "--source",
-            "ank",
+            "ank:sync",
             "--token",
             "ank=TASK-de0a",
             "--token",
@@ -205,7 +205,7 @@ fn report_metadata_without_ttl_passes_no_ttl() {
             "report-metadata",
             "w1:p2",
             "--source",
-            "ank",
+            "ank:sync",
             "--clear-token",
             "ank"
         ]
