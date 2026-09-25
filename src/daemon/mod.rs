@@ -47,10 +47,11 @@ const KINDS: [&str; 7] = [
 const PER_PANE_KIND: &str = "pane.agent_status_changed";
 
 /// The single-instance lock: an exclusive `flock` on a file of the plugin's
-/// state directory, released when the process ends, however it ends.
+/// state directory, released when dropped and when the process ends, however
+/// it ends.
 #[derive(Debug)]
 pub struct Lock {
-    _file: File,
+    file: File,
 }
 
 impl Lock {
@@ -63,10 +64,19 @@ impl Lock {
             .write(true)
             .open(state_dir.join(LOCK_FILE))?;
         match file.try_lock() {
-            Ok(()) => Ok(Some(Lock { _file: file })),
+            Ok(()) => Ok(Some(Lock { file })),
             Err(fs::TryLockError::WouldBlock) => Ok(None),
             Err(fs::TryLockError::Error(err)) => Err(err),
         }
+    }
+}
+
+impl Drop for Lock {
+    /// Unlocks before the close: a child forked meanwhile holds a duplicate of
+    /// the descriptor until its exec, and the `flock` follows the open file,
+    /// so closing ours alone would leave the lock held a moment longer.
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
     }
 }
 

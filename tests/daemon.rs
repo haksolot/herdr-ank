@@ -3,7 +3,8 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use herdr_ank::daemon::{minutes_until, Lock, Schedule};
@@ -37,6 +38,40 @@ fn a_second_lock_on_the_state_dir_is_refused_until_the_first_is_dropped() {
     assert!(
         Lock::acquire(&dir).unwrap().is_some(),
         "a dropped lock is free"
+    );
+}
+
+#[test]
+fn a_dropped_lock_is_free_while_another_test_spawns_processes() {
+    let dir = tempdir("lock-vs-spawn");
+    let stop = Arc::new(AtomicBool::new(false));
+    let spawner = {
+        let stop = Arc::clone(&stop);
+        std::thread::spawn(move || {
+            while !stop.load(Ordering::SeqCst) {
+                let mut command = Command::new(env!("CARGO_BIN_EXE_herdr-ank"));
+                command.stdout(Stdio::null()).stderr(Stdio::null());
+                let _ = command.spawn().unwrap().wait();
+            }
+        })
+    };
+    let rounds = 2000;
+    let mut refused = 0;
+    for _ in 0..rounds {
+        // Each round starts and ends with the lock free: any refusal is a lock
+        // some other holder kept after this test dropped it.
+        for _ in 0..2 {
+            match Lock::acquire(&dir).unwrap() {
+                Some(lock) => drop(lock),
+                None => refused += 1,
+            }
+        }
+    }
+    stop.store(true, Ordering::SeqCst);
+    spawner.join().unwrap();
+    assert_eq!(
+        refused, 0,
+        "the lock was held after its drop {refused}/{rounds} times"
     );
 }
 
