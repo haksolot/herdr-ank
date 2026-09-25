@@ -186,10 +186,6 @@ struct AgentResult {
     agent: Pane,
 }
 
-/// Any result: the fields are not read, only its presence is.
-#[derive(Deserialize)]
-struct Ignored {}
-
 impl Client {
     pub fn new(bin: impl Into<PathBuf>, socket: impl Into<PathBuf>) -> Self {
         Client {
@@ -243,7 +239,7 @@ impl Client {
             args.push("--ttl-ms".into());
             args.push(ttl.to_string().into());
         }
-        self.run::<Ignored>(args).map(drop)
+        self.run_unit(args)
     }
 
     pub fn notification_show(
@@ -259,7 +255,7 @@ impl Client {
         }
         args.push("--sound".into());
         args.push(sound.as_arg().into());
-        self.run::<Ignored>(args).map(drop)
+        self.run_unit(args)
     }
 
     /// Creates the worktree and its tab; returns the tab's root pane.
@@ -307,7 +303,7 @@ impl Client {
     }
 
     pub fn agent_prompt(&self, target: &str, text: &str) -> Result<(), HerdrError> {
-        self.run::<Ignored>(argv(["agent", "prompt", target, text]))
+        self.run_unit(argv(["agent", "prompt", target, text]))
             .map(drop)
     }
 
@@ -342,8 +338,23 @@ impl Client {
 
     /// Runs `herdr <args>` without a shell and decodes its `result`.
     fn run<T: DeserializeOwned>(&self, args: Vec<OsString>) -> Result<T, HerdrError> {
+        let stdout = self.exec(&args)?;
+        serde_json::from_slice::<Success<T>>(&stdout)
+            .map(|success| success.result)
+            .map_err(|err| HerdrError::Decode(format!("{}: {err}", args_display(&args))))
+    }
+
+    /// Runs `herdr <args>` for its effect: exit 0 is the success, whatever
+    /// stdout holds. herdr 0.9.1 `pane report-metadata` writes nothing.
+    fn run_unit(&self, args: Vec<OsString>) -> Result<(), HerdrError> {
+        self.exec(&args).map(drop)
+    }
+
+    /// Runs `herdr <args>` without a shell; its stdout on exit 0, else the
+    /// error herdr wrote on stderr.
+    fn exec(&self, args: &[OsString]) -> Result<Vec<u8>, HerdrError> {
         let output = Command::new(&self.bin)
-            .args(&args)
+            .args(args)
             .output()
             .map_err(|source| HerdrError::Io {
                 context: format!("running {}", self.bin.display()),
@@ -359,9 +370,7 @@ impl Client {
                 },
             });
         }
-        serde_json::from_slice::<Success<T>>(&output.stdout)
-            .map(|success| success.result)
-            .map_err(|err| HerdrError::Decode(format!("{}: {err}", args_display(&args))))
+        Ok(output.stdout)
     }
 }
 

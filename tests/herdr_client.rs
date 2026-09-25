@@ -615,3 +615,29 @@ fn subscribe_decodes_the_lifecycle_events_the_daemon_wakes_on() {
         ]
     );
 }
+
+#[test]
+fn a_verb_whose_result_is_not_read_succeeds_on_an_empty_stdout() {
+    // herdr 0.9.1 `pane report-metadata` exits 0 and writes nothing.
+    let fake = FakeHerdr::answering("empty-report", "");
+    fake.client()
+        .report_metadata("w1:p2", &[("ank_task", "TASK-b636")], &[], Some(90_000))
+        .expect("an empty stdout with exit 0 is a success");
+    let fake = FakeHerdr::answering("empty-notify", "");
+    fake.client()
+        .notification_show("t", None, Sound::None)
+        .expect("an empty stdout with exit 0 is a success");
+    let fake = FakeHerdr::answering("empty-prompt", "");
+    fake.client()
+        .agent_prompt("ank-2", "ank claim TASK-b636")
+        .expect("an empty stdout with exit 0 is a success");
+}
+
+#[test]
+fn a_verb_whose_result_is_read_still_fails_on_an_empty_stdout() {
+    let fake = FakeHerdr::answering("empty-list", "");
+    assert!(matches!(
+        fake.client().pane_list(None),
+        Err(HerdrError::Decode(_))
+    ));
+}
