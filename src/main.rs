@@ -5,7 +5,7 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use herdr_ank::{ank, config, herdr, pick, work};
 
-/// herdr plugin for ank: every manifest entry is a subcommand (ADR-7aab39e2dbd8).
+/// herdr plugin for ank: every manifest entry is a subcommand (ADR-599b6f424271).
 #[derive(Parser)]
 #[command(name = "herdr-ank", version, about)]
 struct Cli {

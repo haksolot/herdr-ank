@@ -1,4 +1,4 @@
-# Publishes the prebuilt binaries install.sh downloads (ADR-7aab39e2dbd8).
+# Publishes the prebuilt binaries install.sh downloads (ADR-599b6f424271).
 # Triggered only by a tag the human pushes; nothing here creates a tag.
 name: release
 

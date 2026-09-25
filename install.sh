@@ -1,5 +1,5 @@
 #!/bin/sh
-# The manifest's [[build]] (ADR-7aab39e2dbd8): puts the release binary of this
+# The manifest's [[build]] (ADR-599b6f424271): puts the release binary of this
 # platform in ./bin/herdr-ank, checked against SHA256SUMS, and falls back to
 # cargo build --release only when that fails and cargo is present.
 set -eu
