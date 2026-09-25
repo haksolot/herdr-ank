@@ -5,15 +5,19 @@ slug: le-plugin-est-un-seul-binaire-rust-herdr-ank-don
 title: Le plugin est un seul binaire Rust, herdr-ank, dont chaque entrée du manifeste est une sous-commande
 created: 2026-09-25T16:51:34Z
 author: haksolot@omarchy
-status: proposed
+status: accepted
 scope:
   - herdr-plugin.toml
   - Cargo.toml
   - src/**
 constraint: |
   Toute commande déclarée dans herdr-plugin.toml (build, startup, actions, panes, events, link_handlers) invoque le binaire herdr-ank produit par cargo build --release, ou ank tui à travers lui. Aucun script shell, Python ou Node n'est une entrée du manifeste. Le plugin cible linux et macos ; windows n'est pas déclaré tant que le socket nommé n'est pas couvert.
+ratified: dda7e07d5563
+verified:
+  - by: haksolot@omarchy
+    at: 2026-09-25T17:11:52Z
 schema: 4
-version: 1
+version: 2
 ---
 
 Le périmètre v1 choisi le 2026-09-25 est large : token de tâche par agent dans la
