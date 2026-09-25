@@ -19,3 +19,9 @@ id = "pick"
 title = "Pick a task"
 placement = "popup"
 command = ["./target/release/herdr-ank", "pick"]
+
+[[panes]]
+id = "tui"
+title = "Ank"
+placement = "overlay"
+command = ["./target/release/herdr-ank", "tui"]

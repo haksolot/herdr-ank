@@ -41,6 +41,9 @@ impl Command {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    if let Command::Tui = cli.command {
+        return herdr_ank::tui::run();
+    }
     let result = match cli.command {
         Command::Work => run_work(),
         Command::Pick => run_pick(),
