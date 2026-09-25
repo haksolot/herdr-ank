@@ -6,7 +6,15 @@ This repo uses Ank: tasks and decisions live in `.ank/`.
   opened for you. `/home/haksolot/Projects/herdr-ank` is the integration tree on
   `main`: never edit a file there.
 - A task is one branch cut from `main` at claim time:
-  `git checkout -b task/<short id> main`. There is no remote; nothing to fetch.
+  `git checkout -b task/<short id> main`. `main` moves only in the
+  integration tree; never fetch or pull it from origin.
+- CI (`.github/workflows/ci.yml`) runs tests, clippy and fmt on ubuntu, macos
+  and windows; it is the only proof of a Windows clause (ADR-599b6f424271).
+  To get it, push the task branch: `git push -u origin task/<short id>`, then
+  read the run to its end with `gh run watch` and `ank log` each job's result.
+  After landing, delete the remote branch:
+  `git push origin --delete task/<short id>`. Never push `main`, never push a
+  tag, never create a release: those are the human's.
 - Landing, after `ank done` and a commit of everything the task touched
   (including `.ank/entities`):
 
