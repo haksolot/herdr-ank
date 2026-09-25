@@ -40,8 +40,12 @@ proof:
     criteria: 0e600bc85fa1
     verifier: fmt-check@5ca6d10bcd55
     via: verifier
+  - type: assertion
+    ref: "herdr 0.9.1 live, integration tree 2c5aa1f after cargo build --release: plugin list --json shows ank enabled at /home/haksolot/Projects/herdr-ank; plugin action list --plugin ank returns action work, contexts [workspace], command ./target/release/herdr-ank work"
+    criteria: 0e600bc85fa1
+    via: submitted
 schema: 4
-version: 3
+version: 4
 ---
 
 La fonction qui applique « un agent, un arbre, une identité » sans que
