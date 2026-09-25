@@ -5,7 +5,7 @@ slug: le-plugin-se-distribue-en-binaire-pr-compil-par
 title: Le plugin se distribue en binaire précompilé par release GitHub ; [[build]] est un script d'amorçage, cargo en repli
 created: 2026-09-25T18:37:48Z
 author: haksolot@omarchy
-status: accepted
+status: superseded
 scope:
   - herdr-plugin.toml
   - install.sh
@@ -19,7 +19,7 @@ verified:
   - by: haksolot@omarchy
     at: 2026-09-25T18:37:50Z
 schema: 4
-version: 2
+version: 3
 ---
 
 Remplace ADR-aca6aaeb3a5f sur la distribution ; le reste de sa décision tient : un
