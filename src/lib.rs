@@ -4,6 +4,7 @@ pub mod ank;
 pub mod config;
 pub mod daemon;
 pub mod herdr;
+pub mod notify;
 pub mod pick;
 pub mod sync;
 pub mod tui;

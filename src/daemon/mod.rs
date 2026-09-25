@@ -4,8 +4,10 @@
 //!
 //! Journal: stderr only, one line per sync, which `herdr plugin log list`
 //! reads back.
+//!
+//! Between two syncs it tells the user what changed (`crate::notify`).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -17,6 +19,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::ank;
 use crate::config::Config;
 use crate::herdr::{self, Event, Subscription};
+use crate::notify::{Notifier, Observed};
 use crate::sync::{self, Corpus};
 
 const LOCK_FILE: &str = "daemon.lock";
@@ -175,11 +178,15 @@ pub fn run() -> Result<(), String> {
 
     let poll = Duration::from_secs(config.sync.poll_seconds.max(1));
     let mut schedule = Schedule::new(MIN_GAP, poll);
+    let mut notifier = Notifier::default();
     loop {
         let now = Instant::now();
         if schedule.due(now) {
             match sync_once(&herdr, &config) {
-                Ok(reports) => eprintln!("herdr-ank daemon: sync, {reports} report(s)"),
+                Ok((reports, observed)) => {
+                    eprintln!("herdr-ank daemon: sync, {reports} report(s)");
+                    notify(&herdr, &config, &mut notifier, observed);
+                }
                 Err(err) => eprintln!("herdr-ank daemon: sync failed: {err}"),
             }
             schedule.ran(Instant::now());
@@ -194,8 +201,27 @@ pub fn run() -> Result<(), String> {
     }
 }
 
+/// Tells what changed since the previous sync. A task is looked up as done
+/// only once its claim has disappeared.
+fn notify(herdr: &herdr::Client, config: &Config, notifier: &mut Notifier, observed: Observed) {
+    let is_done = |root: &Path, id: &str| {
+        ank::Client::new(root).find(&[id]).is_ok_and(|found| {
+            found
+                .results
+                .iter()
+                .any(|r| r.id == id && r.status == "done")
+        })
+    };
+    for told in notifier.observe(observed, config, is_done) {
+        if let Err(err) = herdr.notification_show(&told.title, told.body.as_deref(), told.sound) {
+            eprintln!("herdr-ank daemon: notification {:?}: {err}", told.title);
+        }
+    }
+}
+
 /// One pass: read herdr and every corpus an agent pane sits in, plan, report.
-pub fn sync_once(herdr: &herdr::Client, config: &Config) -> Result<usize, String> {
+/// Returns the number of reports and what the notifications compare.
+pub fn sync_once(herdr: &herdr::Client, config: &Config) -> Result<(usize, Observed), String> {
     let panes = herdr.pane_list(None).map_err(|e| e.to_string())?;
     let agents = herdr.agent_list().map_err(|e| e.to_string())?;
 
@@ -211,9 +237,13 @@ pub fn sync_once(herdr: &herdr::Client, config: &Config) -> Result<usize, String
     // panes: planned without it, they would lose their tokens to a glitch.
     let mut unread = BTreeSet::new();
     let mut corpora: Vec<Corpus> = Vec::new();
+    let mut queues = BTreeMap::new();
     for root in roots {
         match read_corpus(&root, now) {
-            Ok(corpus) => corpora.push(corpus),
+            Ok((corpus, queue)) => {
+                queues.insert(root, queue);
+                corpora.push(corpus);
+            }
             Err(err) => {
                 eprintln!("herdr-ank daemon: {}: {err}", root.display());
                 unread.insert(root);
@@ -242,7 +272,8 @@ pub fn sync_once(herdr: &herdr::Client, config: &Config) -> Result<usize, String
             eprintln!("herdr-ank daemon: report on {}: {err}", report.pane_id);
         }
     }
-    Ok(reports.len())
+    let observed = Observed::from_sync(&panes, &agents, &corpora, &queues);
+    Ok((reports.len(), observed))
 }
 
 /// The first directory from `cwd` up that carries a corpus. Only the
@@ -253,7 +284,8 @@ fn corpus_root(cwd: &Path) -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
-fn read_corpus(root: &Path, now_unix: u64) -> Result<Corpus, ank::AnkError> {
+/// The corpus at `root`, and the ratification `queue` its status reports.
+fn read_corpus(root: &Path, now_unix: u64) -> Result<(Corpus, u64), ank::AnkError> {
     let client = ank::Client::new(root);
     let in_progress = client.find(&["--status", "in_progress"])?;
     let context = client.context(None)?;
@@ -264,12 +296,13 @@ fn read_corpus(root: &Path, now_unix: u64) -> Result<Corpus, ank::AnkError> {
         .chain(elsewhere)
         .filter_map(|(id, expires)| Some((id.clone(), minutes_until(expires?, now_unix)?)))
         .collect();
-    Ok(Corpus {
+    let corpus = Corpus {
         root: root.to_path_buf(),
         in_progress,
         context,
         expires_in,
-    })
+    };
+    Ok((corpus, status.queue))
 }
 
 /// Subscribes, forwards every event as a trigger, and reconnects: at once
