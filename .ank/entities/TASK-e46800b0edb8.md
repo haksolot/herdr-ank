@@ -14,7 +14,7 @@ done_criteria: |
   Le README décrit l'installation (`herdr plugin install haksolot/herdr-ank`, `herdr plugin link` pour le développement), les quatre fonctions avec la commande herdr qui les déclenche, chaque clé de config et son défaut, et un extrait de configuration herdr affichant `$ank_task` et `$ank_title` dans la sidebar Agents. `herdr plugin install haksolot/herdr-ank --yes` sur une machine avec cargo aboutit à `herdr plugin list --json` listant `ank`. Le dépôt GitHub porte le sujet `herdr-plugin`.
 criteria_by: creator
 schema: 4
-version: 1
+version: 3
 ---
 
 Dernière tâche : rien à écrire tant que les fonctions ne sont pas là.
