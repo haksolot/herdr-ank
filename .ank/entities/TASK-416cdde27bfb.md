@@ -5,7 +5,7 @@ slug: moteur-de-synchronisation-des-panes-worktrees-et
 title: "Moteur de synchronisation : des panes, worktrees et claims aux tokens de la spec"
 created: 2026-09-25T16:54:25Z
 author: haksolot@omarchy
-status: open
+status: done
 scope:
   - src/sync/**
   - tests/sync.rs
@@ -19,6 +19,25 @@ done_criteria: |
 criteria_by: creator
 verify: [cargo-test, clippy, fmt-check]
 method: tdd
+proof:
+  - type: test
+    ref: local/6d1cf7ec1007@15b6de6
+    tree: scope/a5f376f6cfa5
+    criteria: 8c1fd6196589
+    verifier: cargo-test@f14aeab36e1b
+    via: verifier
+  - type: test
+    ref: local/e3b0c44298fc@15b6de6
+    tree: scope/a5f376f6cfa5
+    criteria: 8c1fd6196589
+    verifier: clippy@d335c02ef52c
+    via: verifier
+  - type: test
+    ref: local/e3b0c44298fc@15b6de6
+    tree: scope/a5f376f6cfa5
+    criteria: 8c1fd6196589
+    verifier: fmt-check@5ca6d10bcd55
+    via: verifier
 schema: 4
 version: 3
 ---
