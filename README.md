@@ -11,20 +11,44 @@ of its subcommands. It reads and writes the corpus only through
 
 ## Install
 
-Requires herdr ≥ 0.9.1, `ank` on `PATH`, and a Rust toolchain: herdr builds the
-plugin with `cargo build --release` when it installs it. Linux and macOS.
+Requires herdr ≥ 0.9.1 and `ank` on `PATH`. Linux and macOS, x86_64 and
+aarch64.
 
 ```sh
-herdr plugin install haksolot/herdr-ank        # asks before building
+herdr plugin install haksolot/herdr-ank        # asks before running install.sh
 herdr plugin install haksolot/herdr-ank --yes  # without the prompt
 herdr plugin list --json                       # lists "ank"
 ```
 
-For development, link a checkout instead. `link` never builds, so build first
-and after every change:
+herdr runs the manifest's `[[build]]`, `sh install.sh`, in the plugin's
+directory. The script reads `version` from `herdr-plugin.toml`, picks the
+archive of the platform `uname -sm` names, and downloads it with its sums from
+the GitHub release `v<version>`:
+
+```
+https://github.com/haksolot/herdr-ank/releases/download/v<version>/herdr-ank-<version>-<target>.tar.gz
+https://github.com/haksolot/herdr-ank/releases/download/v<version>/SHA256SUMS
+```
+
+`<target>` is one of `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`,
+`x86_64-apple-darwin`, `aarch64-apple-darwin`. The archive is checked against
+`SHA256SUMS` (`sha256sum` or `shasum -a 256`), and `herdr-ank` lands in
+`./bin/herdr-ank`, which every other entry of the manifest runs. It needs `curl`
+or `wget`, `tar` and `gzip`; no Rust toolchain.
+
+cargo only serves when that fails: no release for this version, a platform
+without an archive, a download or a sum that fails. Then, if `cargo` is on
+`PATH`, the script runs `cargo build --release` and copies
+`target/release/herdr-ank` into `./bin/`; without cargo it exits 1, naming the
+URL it tried (or the platform) and the missing cargo.
+`HERDR_ANK_RELEASE_BASE` replaces the release URL, `file://` included.
+
+For development, link a checkout instead. `link` never builds, and
+`install.sh` would fetch the released binary rather than your changes, so build
+and copy first and after every change:
 
 ```sh
-cargo build --release
+cargo build --release && mkdir -p bin && cp target/release/herdr-ank bin/
 herdr plugin link .
 ```
 

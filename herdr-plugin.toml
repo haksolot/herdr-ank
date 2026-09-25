@@ -6,43 +6,43 @@ description = "Ank tasks, claims and decisions in herdr"
 platforms = ["linux", "macos"]
 
 [[build]]
-command = ["cargo", "build", "--release"]
+command = ["sh", "install.sh"]
 
 [[actions]]
 id = "work"
 title = "Work a task"
 contexts = ["workspace"]
-command = ["./target/release/herdr-ank", "work"]
+command = ["./bin/herdr-ank", "work"]
 
 [[panes]]
 id = "pick"
 title = "Pick a task"
 placement = "popup"
-command = ["./target/release/herdr-ank", "pick"]
+command = ["./bin/herdr-ank", "pick"]
 
 [[panes]]
 id = "tui"
 title = "Ank"
 placement = "overlay"
-command = ["./target/release/herdr-ank", "tui"]
+command = ["./bin/herdr-ank", "tui"]
 
 [[startup]]
-command = ["./target/release/herdr-ank", "daemon"]
+command = ["./bin/herdr-ank", "daemon"]
 
 # The [[events]] below are the daemon's supervisor (ADR-6fb76f3a1197): each
 # launches `herdr-ank daemon`, which exits 0 at once while one already runs.
 [[events]]
 on = "workspace.created"
-command = ["./target/release/herdr-ank", "daemon"]
+command = ["./bin/herdr-ank", "daemon"]
 
 [[events]]
 on = "tab.created"
-command = ["./target/release/herdr-ank", "daemon"]
+command = ["./bin/herdr-ank", "daemon"]
 
 [[events]]
 on = "pane.agent_detected"
-command = ["./target/release/herdr-ank", "daemon"]
+command = ["./bin/herdr-ank", "daemon"]
 
 [[events]]
 on = "worktree.opened"
-command = ["./target/release/herdr-ank", "daemon"]
+command = ["./bin/herdr-ank", "daemon"]
