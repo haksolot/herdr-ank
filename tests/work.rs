@@ -182,7 +182,7 @@ fn work_chains_the_herdr_calls_in_order_after_the_pick() {
         &find_claimed_by("marie@box/ank-c81a"),
     );
     let outcome = work::run(&s.work).unwrap();
-    let worktree = s.dir.join("worktrees/repo/ank-c81a");
+    let worktree = s.dir.join("worktrees").join("repo").join("ank-c81a");
     assert_eq!(
         outcome,
         Outcome::Claimed {
@@ -259,7 +259,7 @@ fn a_claim_held_elsewhere_notifies_and_keeps_the_worktree() {
         Outcome::Unavailable {
             id: "TASK-c81aba215f4d".into(),
             holder: Some("jo@other/ank-7".into()),
-            worktree: s.dir.join("worktrees/repo/ank-c81a"),
+            worktree: s.dir.join("worktrees").join("repo").join("ank-c81a"),
         }
     );
     let calls = calls(&s.dir);
