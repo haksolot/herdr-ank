@@ -81,7 +81,9 @@ So after `herdr plugin link`, the daemon starts with the first of those
 events (opening a tab is enough), and if it dies, the next one brings it
 back. Between the two, the sidebar tokens expire on their own after 90 s;
 nothing else depends on the daemon being alive. `pgrep -af 'herdr-ank daemon'`
-shows it, and `herdr plugin log list --plugin ank` holds its line per sync.
+shows it. `herdr plugin log list --plugin ank` lists the live daemon as
+`running` and each hook that found it as `succeeded`; herdr shows a
+command's stderr, one line per sync, once that command has ended.
 
 ## Configuration
 
