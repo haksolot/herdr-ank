@@ -77,7 +77,7 @@ naming that key.
 | Key                       | Type             | Default    | Meaning                                                  |
 |---------------------------|------------------|------------|----------------------------------------------------------|
 | `agent.kind`              | string           | `"claude"` | herdr agent started for a task                           |
-| `agent.args`              | array of strings | `[]`       | extra arguments for that agent; not passed yet           |
+| `agent.args`              | array of strings | `[]`       | extra arguments passed to that agent, after `--`         |
 | `sync.poll_seconds`       | integer ≥ 0      | `30`       | seconds between two polls of the corpus                  |
 | `notify.done`             | boolean          | `true`     | notify when a task is finished                           |
 | `notify.expiring_minutes` | integer ≥ 0      | `10`       | notify when a claim has fewer minutes left; `0` turns it off |

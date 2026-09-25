@@ -205,8 +205,12 @@ pub fn run(work: &Work) -> Result<Outcome, WorkError> {
         label: Some(&agent),
         focus: true,
     })?;
-    work.herdr
-        .agent_start(&agent, &work.config.agent.kind, &tab.pane_id)?;
+    work.herdr.agent_start(
+        &agent,
+        &work.config.agent.kind,
+        &tab.pane_id,
+        &work.config.agent.args,
+    )?;
     work.herdr
         .agent_prompt(&agent, &format!("ank claim {}", task.id))?;
 

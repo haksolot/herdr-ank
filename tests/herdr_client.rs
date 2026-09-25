@@ -326,13 +326,38 @@ fn agent_start_names_kind_and_pane() {
     );
     let agent = fake
         .client()
-        .agent_start("ank-2", "claude", "w1:p2")
+        .agent_start("ank-2", "claude", "w1:p2", &[])
         .unwrap();
     assert_eq!(
         fake.argv(),
         ["agent", "start", "ank-2", "--kind", "claude", "--pane", "w1:p2"]
     );
     assert_eq!(agent.pane_id, "w1:p2");
+}
+
+#[test]
+fn agent_start_passes_agent_args_after_a_double_dash() {
+    let fake = FakeHerdr::answering(
+        "agent-start-args",
+        &format!(
+            r#"{{"id":"cli:agent:start","result":{{"type":"agent_started","argv":["claude"],"agent":{PANE}}}}}"#
+        ),
+    );
+    fake.client()
+        .agent_start(
+            "ank-2",
+            "claude",
+            "w1:p2",
+            &["--model".into(), "opus".into(), "--kind x".into()],
+        )
+        .unwrap();
+    assert_eq!(
+        fake.argv(),
+        [
+            "agent", "start", "ank-2", "--kind", "claude", "--pane", "w1:p2", "--", "--model",
+            "opus", "--kind x"
+        ]
+    );
 }
 
 #[test]

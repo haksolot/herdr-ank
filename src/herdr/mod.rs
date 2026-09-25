@@ -297,8 +297,19 @@ impl Client {
     }
 
     /// Starts agent `name` of `kind` in `pane`, an interactive shell.
-    pub fn agent_start(&self, name: &str, kind: &str, pane: &str) -> Result<Pane, HerdrError> {
-        let args = argv(["agent", "start", name, "--kind", kind, "--pane", pane]);
+    /// `agent_args` go to the agent itself, after `--`.
+    pub fn agent_start(
+        &self,
+        name: &str,
+        kind: &str,
+        pane: &str,
+        agent_args: &[String],
+    ) -> Result<Pane, HerdrError> {
+        let mut args = argv(["agent", "start", name, "--kind", kind, "--pane", pane]);
+        if !agent_args.is_empty() {
+            args.push("--".into());
+            args.extend(agent_args.iter().map(Into::into));
+        }
         Ok(self.run::<AgentResult>(args)?.agent)
     }
 

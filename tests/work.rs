@@ -202,6 +202,20 @@ fn the_agent_kind_comes_from_the_config() {
 }
 
 #[test]
+fn the_agent_args_come_from_the_config() {
+    let mut s = setup(
+        "args",
+        "TASK-c81aba215f4d",
+        STATUS,
+        &find_claimed_by("marie@box/ank-c81a"),
+    );
+    s.work.config.agent.args = vec!["--model".into(), "opus".into()];
+    work::run(&s.work).unwrap();
+    assert!(calls(&s.dir)
+        .contains(&"agent|start|ank-c81a|--kind|claude|--pane|w1:p-tab|--|--model|opus".into()));
+}
+
+#[test]
 fn a_null_default_branch_starts_the_worktree_from_head() {
     let status = STATUS.replace(r#""default_branch":"main""#, r#""default_branch":null"#);
     let s = setup(
