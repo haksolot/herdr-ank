@@ -5,7 +5,7 @@ slug: install-ps1-amorce-herdr-ank-exe-depuis-la-relea
 title: install.ps1 amorce herdr-ank.exe depuis la release, le manifeste déclare windows, le workflow publie la cible windows-msvc
 created: 2026-09-25T19:06:39Z
 author: haksolot@omarchy
-status: in_progress
+status: done
 scope:
   - install.ps1
   - herdr-plugin.toml
@@ -19,8 +19,27 @@ done_criteria: |
 criteria_by: creator
 verify: [cargo-test, clippy, fmt-check]
 method: tdd
+proof:
+  - type: test
+    ref: local/08c073f70a69@fc3719b
+    tree: scope/a73517aedfaa
+    criteria: dad7592d9ae8
+    verifier: cargo-test@f14aeab36e1b
+    via: verifier
+  - type: test
+    ref: local/e3b0c44298fc@fc3719b
+    tree: scope/a73517aedfaa
+    criteria: dad7592d9ae8
+    verifier: clippy@d335c02ef52c
+    via: verifier
+  - type: test
+    ref: local/e3b0c44298fc@fc3719b
+    tree: scope/a73517aedfaa
+    criteria: dad7592d9ae8
+    verifier: fmt-check@5ca6d10bcd55
+    via: verifier
 schema: 4
-version: 5
+version: 6
 ---
 
 Applique ADR-599b6f424271. Le contrat d'install.sh est la référence, jusqu'aux
