@@ -5,13 +5,17 @@ slug: ce-que-le-plugin-rapporte-herdr-tokens-de-pane-e
 title: "Ce que le plugin rapporte à herdr : tokens de pane et de workspace, libellé d'agent, source, ttl"
 created: 2026-09-26T06:55:22Z
 author: haksolot@vmi3223161
-status: proposed
+status: accepted
 scope:
   - src/sync/**
 references: [ADR-fa8b6a103597, ADR-357c017baf9b]
 supersedes: SPEC-dbe3cf972f71
+ratified: 2a7112a955ba
+verified:
+  - by: haksolot@vmi3223161/ank-4fbf
+    at: 2026-09-26T09:02:08Z
 schema: 4
-version: 1
+version: 2
 ---
 
 Le plugin ne possède aucune surface d'affichage : ce qu'il montre, il le
