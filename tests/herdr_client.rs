@@ -202,6 +202,111 @@ fn report_metadata_without_ttl_passes_no_ttl() {
 }
 
 #[test]
+fn report_metadata_as_passes_the_display_agent_after_the_source() {
+    let fake = FakeHerdr::answering("report-metadata-label", "");
+    fake.client()
+        .report_metadata_as(
+            "w1:p2",
+            Some("claude · TASK-de0a"),
+            &[("ank", "TASK-de0a")],
+            &["ank_expiry"],
+            Some(90_000),
+        )
+        .unwrap();
+    assert_eq!(
+        fake.argv(),
+        [
+            "pane",
+            "report-metadata",
+            "w1:p2",
+            "--source",
+            "ank:sync",
+            "--display-agent",
+            "claude · TASK-de0a",
+            "--token",
+            "ank=TASK-de0a",
+            "--clear-token",
+            "ank_expiry",
+            "--ttl-ms",
+            "90000",
+        ]
+    );
+}
+
+#[test]
+fn report_metadata_as_without_a_label_passes_no_display_agent() {
+    let fake = FakeHerdr::answering("report-metadata-nolabel", "");
+    fake.client()
+        .report_metadata_as("w1:p2", None, &[("ank", "TASK-de0a")], &[], Some(90_000))
+        .unwrap();
+    assert_eq!(
+        fake.argv(),
+        [
+            "pane",
+            "report-metadata",
+            "w1:p2",
+            "--source",
+            "ank:sync",
+            "--token",
+            "ank=TASK-de0a",
+            "--ttl-ms",
+            "90000",
+        ]
+    );
+}
+
+#[test]
+fn report_workspace_metadata_sets_and_clears_tokens_under_the_plugin_source() {
+    let fake = FakeHerdr::answering("workspace-report-metadata", "");
+    fake.client()
+        .report_workspace_metadata(
+            "w1",
+            &[("ank_queue", "3 open"), ("ank_claims", "2")],
+            &["ank_review"],
+            Some(90_000),
+        )
+        .unwrap();
+    assert_eq!(
+        fake.argv(),
+        [
+            "workspace",
+            "report-metadata",
+            "w1",
+            "--source",
+            "ank:sync",
+            "--token",
+            "ank_queue=3 open",
+            "--token",
+            "ank_claims=2",
+            "--clear-token",
+            "ank_review",
+            "--ttl-ms",
+            "90000",
+        ]
+    );
+}
+
+#[test]
+fn report_workspace_metadata_without_ttl_passes_no_ttl() {
+    let fake = FakeHerdr::answering("workspace-report-metadata-nottl", "");
+    fake.client()
+        .report_workspace_metadata("w1", &[], &["ank_queue"], None)
+        .unwrap();
+    assert_eq!(
+        fake.argv(),
+        [
+            "workspace",
+            "report-metadata",
+            "w1",
+            "--source",
+            "ank:sync",
+            "--clear-token",
+            "ank_queue",
+        ]
+    );
+}
+
+#[test]
 fn notification_show_passes_title_body_and_sound() {
     let fake = FakeHerdr::answering(
         "notification",

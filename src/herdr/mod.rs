@@ -23,7 +23,7 @@ pub use events::{subscribe_over, Event, Subscription};
 /// The plugin id, as `herdr-plugin.toml` declares it.
 pub const PLUGIN_ID: &str = "ank";
 
-/// The `--source` of every pane metadata report (SPEC-dbe3cf972f71).
+/// The `--source` of every pane and workspace metadata report (SPEC-dbe3cf972f71).
 pub const METADATA_SOURCE: &str = "ank:sync";
 
 #[derive(Debug)]
@@ -226,19 +226,45 @@ impl Client {
         clear: &[&str],
         ttl_ms: Option<u64>,
     ) -> Result<(), HerdrError> {
+        self.report_metadata_as(pane, None, tokens, clear, ttl_ms)
+    }
+
+    /// `report_metadata`, and shows `display_agent` in place of the agent's
+    /// name in the sidebar; herdr's `agent` field keeps the detected name.
+    pub fn report_metadata_as(
+        &self,
+        pane: &str,
+        display_agent: Option<&str>,
+        tokens: &[(&str, &str)],
+        clear: &[&str],
+        ttl_ms: Option<u64>,
+    ) -> Result<(), HerdrError> {
         let mut args = argv(["pane", "report-metadata", pane, "--source", METADATA_SOURCE]);
-        for (name, value) in tokens {
-            args.push("--token".into());
-            args.push(format!("{name}={value}").into());
+        if let Some(label) = display_agent {
+            args.push("--display-agent".into());
+            args.push(label.into());
         }
-        for name in clear {
-            args.push("--clear-token".into());
-            args.push((*name).into());
-        }
-        if let Some(ttl) = ttl_ms {
-            args.push("--ttl-ms".into());
-            args.push(ttl.to_string().into());
-        }
+        push_metadata(&mut args, tokens, clear, ttl_ms);
+        self.run_unit(args)
+    }
+
+    /// Sets `tokens` and clears `clear` on `workspace`, under the plugin's
+    /// source.
+    pub fn report_workspace_metadata(
+        &self,
+        workspace: &str,
+        tokens: &[(&str, &str)],
+        clear: &[&str],
+        ttl_ms: Option<u64>,
+    ) -> Result<(), HerdrError> {
+        let mut args = argv([
+            "workspace",
+            "report-metadata",
+            workspace,
+            "--source",
+            METADATA_SOURCE,
+        ]);
+        push_metadata(&mut args, tokens, clear, ttl_ms);
         self.run_unit(args)
     }
 
@@ -389,6 +415,28 @@ fn env_path(var: &'static str) -> Result<PathBuf, HerdrError> {
     match std::env::var_os(var) {
         Some(value) if !value.is_empty() => Ok(value.into()),
         _ => Err(HerdrError::MissingEnv(var)),
+    }
+}
+
+/// The `--token`, `--clear-token` and `--ttl-ms` flags both
+/// `report-metadata` verbs share.
+fn push_metadata(
+    args: &mut Vec<OsString>,
+    tokens: &[(&str, &str)],
+    clear: &[&str],
+    ttl_ms: Option<u64>,
+) {
+    for (name, value) in tokens {
+        args.push("--token".into());
+        args.push(format!("{name}={value}").into());
+    }
+    for name in clear {
+        args.push("--clear-token".into());
+        args.push((*name).into());
+    }
+    if let Some(ttl) = ttl_ms {
+        args.push("--ttl-ms".into());
+        args.push(ttl.to_string().into());
     }
 }
 
