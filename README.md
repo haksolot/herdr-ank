@@ -11,7 +11,10 @@ of its subcommands. It reads and writes the corpus only through
 
 ## Install
 
-Requires herdr ≥ 0.9.1 and `ank` on `PATH`. Linux and macOS, x86_64 and
+Requires herdr ≥ 0.9.1 and `ank`. herdr often runs as a service whose
+`PATH` lacks your own bin directories, so the plugin looks for `ank` on `PATH`,
+then next to herdr, in `~/.local/bin`, `~/.cargo/bin`, and on Linux and macOS
+in `/opt/homebrew/bin` and `/usr/local/bin`. Linux and macOS, x86_64 and
 aarch64; Windows, x86_64, with Windows PowerShell 5.1 (what Windows ships).
 
 ```sh
@@ -167,6 +170,9 @@ is the supervisor:
 - `[[events]]` launch it again on `workspace.created`, `tab.created`,
   `pane.agent_detected` and `worktree.opened`. While a daemon holds the lock,
   each of these launches exits 0 at once and writes nothing.
+
+When an update replaces `bin/herdr-ank`, the running daemon notices within
+a poll, releases the lock and starts the new binary in its place.
 
 So after `herdr plugin link`, the daemon starts with the first of those
 events (opening a tab is enough), and if it dies, the next one brings it
