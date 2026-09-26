@@ -5,7 +5,7 @@ slug: client-herdr-report-metadata-porte-display-agent
 title: "Client herdr : report_metadata porte --display-agent, et un rapport de workspace par workspace report-metadata ; mesure de --display-agent dans herdr 0.9.1"
 created: 2026-09-26T06:55:41Z
 author: haksolot@vmi3223161
-status: in_progress
+status: done
 scope:
   - src/herdr/mod.rs
   - tests/herdr_client.rs
@@ -21,6 +21,25 @@ done_criteria: |
 criteria_by: creator
 verify: [cargo-test, clippy, fmt-check]
 method: tdd
+proof:
+  - type: test
+    ref: local/0b3feca53f99@7561247
+    tree: scope/c05424e5046b
+    criteria: fb47276bd893
+    verifier: cargo-test@f14aeab36e1b
+    via: verifier
+  - type: test
+    ref: local/e3b0c44298fc@7561247
+    tree: scope/c05424e5046b
+    criteria: fb47276bd893
+    verifier: clippy@d335c02ef52c
+    via: verifier
+  - type: test
+    ref: local/e3b0c44298fc@7561247
+    tree: scope/c05424e5046b
+    criteria: fb47276bd893
+    verifier: fmt-check@5ca6d10bcd55
+    via: verifier
 schema: 4
-version: 3
+version: 4
 ---
