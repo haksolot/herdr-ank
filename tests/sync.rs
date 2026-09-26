@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use herdr_ank::ank::{Context, Find};
 use herdr_ank::config::Config;
 use herdr_ank::herdr::Pane;
-use herdr_ank::sync::{plan, Corpus, Report};
+use herdr_ank::sync::{plan, plan_workspaces, Corpus, Report, WorkspaceReport};
 
 const REPO: &str = "/src/repo";
 const WT: &str = "/wt/agent-ank-2";
@@ -340,4 +340,93 @@ fn no_label_outside_every_corpus_or_without_an_agent_field() {
     assert!(reports.iter().all(|r| r.pane_id != "w1:p1"), "{reports:#?}");
     let p2 = reports.iter().find(|r| r.pane_id == "w1:p2").unwrap();
     assert_eq!(p2.display_agent, None);
+}
+
+fn in_workspace(id: &str, workspace: &str, cwd: &str) -> Pane {
+    serde_json::from_value(serde_json::json!({
+        "pane_id": id, "workspace_id": workspace, "tab_id": format!("{workspace}:t1"),
+        "cwd": cwd, "focused": false, "revision": 1,
+    }))
+    .unwrap()
+}
+
+fn workspace_tokens(report: &WorkspaceReport) -> Vec<(&str, &str)> {
+    report
+        .tokens
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect()
+}
+
+#[test]
+fn a_workspace_with_a_pane_in_a_corpus_gets_its_three_counts() {
+    let panes = [in_workspace("w1:p1", "w1", &format!("{REPO}/src"))];
+    let repo = corpus(
+        REPO,
+        &[
+            ("TASK-416cdde27bfb", "Sync", "marie@box/ank-2"),
+            ("TASK-91a1aaaaaaaa", "Daemon", "marie@box"),
+        ],
+        4,
+    );
+
+    let reports = plan_workspaces(&panes, &[repo], &BTreeMap::new());
+
+    assert_eq!(reports.len(), 1, "{reports:#?}");
+    assert_eq!(reports[0].workspace_id, "w1");
+    assert_eq!(reports[0].source, "ank:sync");
+    assert_eq!(reports[0].ttl_ms, 90_000);
+    assert_eq!(
+        workspace_tokens(&reports[0]),
+        [("ank_queue", "4"), ("ank_claims", "2"), ("ank_review", "0")]
+    );
+}
+
+#[test]
+fn the_corpus_owning_most_panes_of_a_workspace_wins() {
+    let panes = [
+        in_workspace("w1:p1", "w1", REPO),
+        in_workspace("w1:p2", "w1", WT),
+        in_workspace("w1:p3", "w1", &format!("{WT}/src")),
+    ];
+    let repo = corpus(REPO, &[], 1);
+    let wt = corpus(WT, &[("TASK-416cdde27bfb", "Sync", "marie@box")], 7);
+    let reviews = BTreeMap::from([(PathBuf::from(REPO), 5), (PathBuf::from(WT), 3)]);
+
+    let reports = plan_workspaces(&panes, &[repo, wt], &reviews);
+
+    assert_eq!(reports.len(), 1, "{reports:#?}");
+    assert_eq!(
+        workspace_tokens(&reports[0]),
+        [("ank_queue", "7"), ("ank_claims", "1"), ("ank_review", "3")]
+    );
+}
+
+#[test]
+fn on_a_tie_the_corpus_of_the_first_pane_listed_wins() {
+    let panes = [
+        in_workspace("w1:p1", "w1", WT),
+        in_workspace("w1:p2", "w1", REPO),
+    ];
+    let repo = corpus(REPO, &[], 1);
+    let wt = corpus(WT, &[], 7);
+
+    let reports = plan_workspaces(&panes, &[repo, wt], &BTreeMap::new());
+
+    assert_eq!(reports.len(), 1, "{reports:#?}");
+    assert_eq!(workspace_tokens(&reports[0])[0], ("ank_queue", "7"));
+}
+
+#[test]
+fn a_workspace_with_no_pane_in_a_corpus_receives_nothing() {
+    let panes = [
+        in_workspace("w1:p1", "w1", "/elsewhere"),
+        in_workspace("w2:p1", "w2", REPO),
+    ];
+    let repo = corpus(REPO, &[], 1);
+
+    let reports = plan_workspaces(&panes, &[repo], &BTreeMap::new());
+
+    assert_eq!(reports.len(), 1, "{reports:#?}");
+    assert_eq!(reports[0].workspace_id, "w2");
 }

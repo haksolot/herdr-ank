@@ -16,6 +16,9 @@ pub const TITLE: &str = "ank_title";
 pub const EXPIRES: &str = "ank_expires";
 pub const AMBIGUOUS: &str = "ank_ambiguous";
 pub const QUEUE: &str = "ank_queue";
+/// Workspace tokens (SPEC-43438bbcb5ca), beside `QUEUE`.
+pub const CLAIMS: &str = "ank_claims";
+pub const REVIEW: &str = "ank_review";
 
 /// Every token the plugin owns, in the order the spec lists them.
 pub const TOKENS: [&str; 5] = [TASK, TITLE, EXPIRES, AMBIGUOUS, QUEUE];
@@ -41,6 +44,15 @@ pub struct Corpus {
     /// nor `context` carries an expiry; the fetching side reads it from
     /// `ank status --json`. A claim missing here reports no `ank_expires`.
     pub expires_in: BTreeMap<String, u64>,
+}
+
+/// One `herdr workspace report-metadata` call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceReport {
+    pub workspace_id: String,
+    pub source: &'static str,
+    pub tokens: Vec<(String, String)>,
+    pub ttl_ms: u64,
 }
 
 /// One `herdr pane report-metadata` call.
@@ -199,4 +211,66 @@ fn short_id(id: &str) -> String {
         Some((kind, hash)) => format!("{kind}-{}", hash.chars().take(4).collect::<String>()),
         None => id.to_owned(),
     }
+}
+
+/// One report per workspace with at least one pane inside a corpus, any
+/// pane, agent or not: the counts of the corpus owning most of its panes,
+/// and on a tie the corpus of the first such pane in `panes` order. The
+/// three tokens are always sent, `0` included; no other workspace is
+/// reported (SPEC-43438bbcb5ca).
+///
+/// `reviews` holds, by corpus root, the `queue` of `ank status --json`: the
+/// decisions awaiting ratification, what `ank review` lists, read without
+/// running it (ADR-3cd19cd6acb9). A root missing there counts `0`.
+pub fn plan_workspaces(
+    panes: &[Pane],
+    corpora: &[Corpus],
+    reviews: &BTreeMap<PathBuf, u64>,
+) -> Vec<WorkspaceReport> {
+    // Per workspace, in first-seen order: each corpus with its pane count,
+    // in the order its first pane appears.
+    let mut seen: Vec<(&str, Vec<(&Corpus, usize)>)> = Vec::new();
+    for pane in panes {
+        let Some(corpus) = pane.cwd.as_deref().and_then(|cwd| owner(cwd, corpora)) else {
+            continue;
+        };
+        let workspace = pane.workspace_id.as_str();
+        let counts = match seen.iter_mut().find(|(w, _)| *w == workspace) {
+            Some((_, counts)) => counts,
+            None => {
+                seen.push((workspace, Vec::new()));
+                &mut seen.last_mut().expect("just pushed").1
+            }
+        };
+        match counts.iter_mut().find(|(c, _)| std::ptr::eq(*c, corpus)) {
+            Some((_, n)) => *n += 1,
+            None => counts.push((corpus, 1)),
+        }
+    }
+
+    seen.into_iter()
+        .filter_map(|(workspace, counts)| {
+            // max_by_key keeps the last maximum: reverse so the first wins.
+            let (corpus, _) = counts.into_iter().rev().max_by_key(|(_, n)| *n)?;
+            let claims = corpus
+                .in_progress
+                .results
+                .iter()
+                .filter(|found| found.state.starts_with("claimed:"))
+                .count();
+            Some(WorkspaceReport {
+                workspace_id: workspace.to_owned(),
+                source: SOURCE,
+                tokens: vec![
+                    (QUEUE.to_owned(), corpus.context.ready.to_string()),
+                    (CLAIMS.to_owned(), claims.to_string()),
+                    (
+                        REVIEW.to_owned(),
+                        reviews.get(&corpus.root).copied().unwrap_or(0).to_string(),
+                    ),
+                ],
+                ttl_ms: TTL_MS,
+            })
+        })
+        .collect()
 }

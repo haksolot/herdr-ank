@@ -241,9 +241,10 @@ pub fn sync_once(herdr: &herdr::Client, config: &Config) -> Result<(usize, Obser
     let panes = herdr.pane_list(None).map_err(|e| e.to_string())?;
     let agents = herdr.agent_list().map_err(|e| e.to_string())?;
 
+    // Every pane counts, agent or not: a workspace is reported as soon as
+    // one of its panes sits in a corpus (SPEC-43438bbcb5ca).
     let roots: BTreeSet<PathBuf> = panes
         .iter()
-        .filter(|p| agents.iter().any(|a| a.pane_id == p.pane_id))
         .filter_map(|p| corpus_root(p.cwd.as_deref()?))
         .collect();
     let now = SystemTime::now()
@@ -292,6 +293,27 @@ pub fn sync_once(herdr: &herdr::Client, config: &Config) -> Result<(usize, Obser
             eprintln!("herdr-ank daemon: report on {}: {err}", report.pane_id);
         }
     }
+    let workspaces = sync::plan_workspaces(&panes, &corpora, &queues);
+    for report in &workspaces {
+        let tokens: Vec<(&str, &str)> = report
+            .tokens
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        if let Err(err) =
+            herdr.report_workspace_metadata(&report.workspace_id, &tokens, &[], Some(report.ttl_ms))
+        {
+            eprintln!("herdr-ank daemon: report on {}: {err}", report.workspace_id);
+        }
+    }
+    // Notifications keep to the corpora an agent works in, as before the
+    // workspace tokens widened what a pass reads.
+    let agent_roots: BTreeSet<PathBuf> = panes
+        .iter()
+        .filter(|p| agents.iter().any(|a| a.pane_id == p.pane_id))
+        .filter_map(|p| corpus_root(p.cwd.as_deref()?))
+        .collect();
+    queues.retain(|root, _| agent_roots.contains(root));
     let observed = Observed::from_sync(&panes, &agents, &corpora, &queues);
     Ok((reports.len(), observed))
 }

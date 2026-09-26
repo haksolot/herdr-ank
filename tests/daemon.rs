@@ -274,28 +274,36 @@ fn an_event_hook_finding_the_lock_free_becomes_the_daemon() {
     assert!(alive, "the hook exited instead of staying as the daemon");
 }
 
-/// One `herdr-ank sync` pass against a fake herdr and a fake ank sharing
-/// `bin/`: the agent pane in the corpus is labelled with `--display-agent`.
-#[test]
-fn a_sync_reports_the_agent_label_with_the_tokens() {
-    let dir = tempdir("sync-label");
+/// Runs one `herdr-ank sync` pass against a fake herdr and a fake ank
+/// sharing `bin/`, with a corpus at `<dir>/repo` whose find lists one claim
+/// by `marie@box/ank-2`, whose context says 3 claimable and whose status
+/// says 1 decision queued. `panes` builds `pane list` from the repo path;
+/// `agent list` holds those with an `agent` field, named `ank-2`.
+fn sync_pass(
+    name: &str,
+    panes: impl Fn(&std::path::Path) -> Vec<serde_json::Value>,
+) -> Vec<support::Call> {
+    let dir = tempdir(name);
     let bin = dir.join("bin");
     fs::create_dir_all(&bin).unwrap();
     let herdr = support::link(&bin, "herdr");
     support::link(&bin, "ank");
     let repo = dir.join("repo");
     fs::create_dir_all(repo.join(".ank")).unwrap();
-    let pane = serde_json::json!({
-        "pane_id": "w1:p2", "workspace_id": "w1", "tab_id": "w1:t1",
-        "cwd": repo, "agent": "claude", "agent_status": "working",
-        "focused": false, "revision": 1,
-    });
-    let mut agent = pane.clone();
-    agent["name"] = "ank-2".into();
+    let panes = panes(&repo);
+    let agents: Vec<_> = panes
+        .iter()
+        .filter(|p| p.get("agent").is_some())
+        .map(|p| {
+            let mut agent = p.clone();
+            agent["name"] = "ank-2".into();
+            agent
+        })
+        .collect();
     let panes = serde_json::json!({ "id": "cli:pane:list",
-        "result": { "type": "pane_list", "panes": [pane] } });
+        "result": { "type": "pane_list", "panes": panes } });
     let agents = serde_json::json!({ "id": "cli:agent:list",
-        "result": { "type": "agent_list", "agents": [agent] } });
+        "result": { "type": "agent_list", "agents": agents } });
     let find = serde_json::json!({
         "contract": 1, "corpus": null, "total": 1, "shown": 1, "hidden": 0,
         "results": [{
@@ -309,6 +317,7 @@ fn a_sync_reports_the_agent_label_with_the_tokens() {
         "method": null, "constraints": [], "proposed": [], "specs": [], "tasks": [],
         "log": [], "ready": 3, "blocked": 0, "finished_elsewhere": 0, "warnings": [],
     });
+    // queue 1, and expiries ank cannot parse, so no ank_expires
     let status = fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ank/status.json"),
     )
@@ -339,16 +348,28 @@ fn a_sync_reports_the_agent_label_with_the_tokens() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let calls = support::calls(&bin);
-    let report = calls
+    support::calls(&bin)
+}
+
+fn call<'a>(calls: &'a [support::Call], prefix: &[&str]) -> &'a support::Call {
+    calls
         .iter()
-        .find(|c| {
-            c.argv
-                .starts_with(&["pane".into(), "report-metadata".into()])
-        })
-        .unwrap_or_else(|| panic!("no pane report-metadata among {calls:#?}"));
+        .find(|c| c.argv.iter().zip(prefix).all(|(a, p)| a == p) && c.argv.len() >= prefix.len())
+        .unwrap_or_else(|| panic!("no {prefix:?} among {calls:#?}"))
+}
+
+#[test]
+fn a_sync_reports_the_agent_label_with_the_tokens() {
+    let calls = sync_pass("sync-label", |repo| {
+        vec![serde_json::json!({
+            "pane_id": "w1:p2", "workspace_id": "w1", "tab_id": "w1:t1",
+            "cwd": repo, "agent": "claude", "agent_status": "working",
+            "focused": false, "revision": 1,
+        })]
+    });
+
     assert_eq!(
-        report.argv,
+        call(&calls, &["pane", "report-metadata"]).argv,
         [
             "pane",
             "report-metadata",
@@ -370,5 +391,40 @@ fn a_sync_reports_the_agent_label_with_the_tokens() {
             "--ttl-ms",
             "90000",
         ]
+    );
+}
+
+#[test]
+fn a_sync_reports_the_workspace_counts_even_without_an_agent_pane() {
+    let calls = sync_pass("sync-workspace", |repo| {
+        vec![serde_json::json!({
+            "pane_id": "w4:p1", "workspace_id": "w4", "tab_id": "w4:t1",
+            "cwd": repo.join("src"), "focused": false, "revision": 1,
+        })]
+    });
+
+    assert_eq!(
+        call(&calls, &["workspace", "report-metadata"]).argv,
+        [
+            "workspace",
+            "report-metadata",
+            "w4",
+            "--source",
+            "ank:sync",
+            "--token",
+            "ank_queue=3",
+            "--token",
+            "ank_claims=1",
+            "--token",
+            "ank_review=1",
+            "--ttl-ms",
+            "90000",
+        ]
+    );
+    assert!(
+        calls
+            .iter()
+            .all(|c| c.argv[0] != "pane" || c.argv[1] != "report-metadata"),
+        "a pane without an agent got a pane report: {calls:#?}"
     );
 }
