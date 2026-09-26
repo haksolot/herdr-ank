@@ -4,8 +4,6 @@
 //! have it claim the task.
 
 use std::fmt;
-use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -15,10 +13,10 @@ use serde::Deserialize;
 use crate::ank::{self, AnkError};
 use crate::config::Config;
 use crate::herdr::{self, HerdrError, Sound, TabCreate, WorktreeCreate};
-use crate::pick;
+use crate::pick::{self, ChooseError};
 
 /// The pane entry the manifest declares for the picker.
-pub const PICK_PANE: &str = "pick";
+pub const PICK_PANE: &str = pick::PANE;
 /// How `work` tells the picker which corpus to list.
 pub const REPO_ENV: &str = "HERDR_ANK_REPO";
 
@@ -79,11 +77,10 @@ pub enum WorkError {
     NoCorpus {
         searched: PathBuf,
     },
-    /// The picker never answered.
-    PickTimeout,
+    /// The picker could not be opened, or never answered.
+    Pick(ChooseError),
     /// The picker chose an id the corpus does not list as claimable.
     UnknownTask(String),
-    State(io::Error),
     Ank(AnkError),
     Herdr(HerdrError),
 }
@@ -101,9 +98,8 @@ impl fmt::Display for WorkError {
                 "no .ank/ in {} or any directory above it\n  -> ank init",
                 searched.display()
             ),
-            WorkError::PickTimeout => write!(f, "the picker was left open without a choice"),
+            WorkError::Pick(e) => write!(f, "{e}"),
             WorkError::UnknownTask(id) => write!(f, "{id} is not a claimable task of this corpus"),
-            WorkError::State(e) => write!(f, "plugin state directory: {e}"),
             WorkError::Ank(e) => write!(f, "{e}"),
             WorkError::Herdr(e) => write!(f, "{e}"),
         }
@@ -115,6 +111,12 @@ impl std::error::Error for WorkError {}
 impl From<AnkError> for WorkError {
     fn from(e: AnkError) -> Self {
         WorkError::Ank(e)
+    }
+}
+
+impl From<ChooseError> for WorkError {
+    fn from(e: ChooseError) -> Self {
+        WorkError::Pick(e)
     }
 }
 
@@ -159,7 +161,15 @@ pub fn run(work: &Work) -> Result<Outcome, WorkError> {
     let corpus = find_corpus(&cwd).ok_or(WorkError::NoCorpus { searched: cwd })?;
     let ank = ank::Client::with_program(&work.ank_program, &corpus);
 
-    let Some(id) = pick_task(work, &workspace, &corpus)? else {
+    let corpus_arg = corpus.to_string_lossy();
+    let Some(id) = pick::choose(
+        &work.herdr,
+        &work.state_dir,
+        &[(REPO_ENV, &corpus_arg)],
+        work.poll,
+        work.pick_timeout,
+    )?
+    else {
         return Ok(Outcome::Cancelled);
     };
     let task = pick::claimable(ank.context(None)?.tasks)
@@ -275,34 +285,6 @@ pub fn run(work: &Work) -> Result<Outcome, WorkError> {
                 agent,
                 worktree,
             });
-        }
-        thread::sleep(work.poll);
-    }
-}
-
-/// Opens the picker and waits for its choice: `None` for a cancel.
-fn pick_task(work: &Work, workspace: &str, corpus: &Path) -> Result<Option<String>, WorkError> {
-    let selection = pick::selection_path(&work.state_dir);
-    match fs::remove_file(&selection) {
-        Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(WorkError::State(e)),
-        _ => {}
-    }
-    let corpus = corpus.to_string_lossy();
-    work.herdr
-        .plugin_pane_open(PICK_PANE, Some(workspace), &[(REPO_ENV, &corpus)])?;
-
-    let deadline = Instant::now() + work.pick_timeout;
-    loop {
-        match fs::read_to_string(&selection) {
-            Ok(id) => {
-                let id = id.trim();
-                return Ok((!id.is_empty()).then(|| id.to_owned()));
-            }
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-            Err(e) => return Err(WorkError::State(e)),
-        }
-        if Instant::now() >= deadline {
-            return Err(WorkError::PickTimeout);
         }
         thread::sleep(work.poll);
     }

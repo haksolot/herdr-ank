@@ -24,6 +24,12 @@ contexts = ["workspace"]
 command = ["./bin/herdr-ank", "work"]
 
 [[actions]]
+id = "land"
+title = "Land a task"
+contexts = ["workspace"]
+command = ["./bin/herdr-ank", "land"]
+
+[[actions]]
 id = "open"
 title = "Ouvrir ank"
 contexts = ["workspace"]

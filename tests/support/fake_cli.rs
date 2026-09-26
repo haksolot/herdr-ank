@@ -7,7 +7,8 @@
 //! --repo <home>/repo`). There it appends the call to `calls.jsonl`, then
 //! answers with the first rule of `answers.json` whose `args` start its argv
 //! and whose `agent`, when given, says whether `ANK_AGENT` is set. No rule
-//! matching is an empty answer and exit 0.
+//! matching is an empty answer and exit 0. An answer may first copy a file or
+//! run a program, standing for what the real command changes on disk.
 
 use std::fs;
 use std::io::Write;
@@ -31,6 +32,10 @@ struct Answer {
     /// A file to copy, `[from, to]`, before answering.
     #[serde(default)]
     copy: Option<(PathBuf, PathBuf)>,
+    /// A program and its arguments to run, and wait for, before answering:
+    /// what the real command would have done to the filesystem.
+    #[serde(default)]
+    run: Option<Vec<String>>,
 }
 
 fn home(argv: &[String]) -> PathBuf {
@@ -68,6 +73,13 @@ fn main() -> ExitCode {
     };
     if let Some((from, to)) = &answer.copy {
         fs::copy(from, to).expect("the fake copies what its answer names");
+    }
+    if let Some((program, args)) = answer.run.as_deref().and_then(<[String]>::split_first) {
+        let status = std::process::Command::new(program)
+            .args(args)
+            .status()
+            .expect("the fake runs what its answer names");
+        assert!(status.success(), "{program} {args:?} failed");
     }
     print!("{}", answer.stdout);
     eprint!("{}", answer.stderr);

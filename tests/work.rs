@@ -195,7 +195,7 @@ fn work_chains_the_herdr_calls_in_order_after_the_pick() {
     assert_eq!(
         calls(&s.dir),
         [
-            "plugin|pane|open|--plugin|ank|--entrypoint|pick|--workspace|w1|--env|HERDR_ANK_REPO={CORPUS}|--focus"
+            "plugin|pane|open|--plugin|ank|--entrypoint|pick|--env|HERDR_ANK_REPO={CORPUS}|--focus"
                 .replace("{CORPUS}", s.corpus.to_str().unwrap()),
             format!("worktree|create|--workspace|w1|--branch|task/c81a|--base|main|--path|{wt}|--label|ank-c81a|--no-focus"),
             format!("tab|create|--workspace|w1|--cwd|{wt}|--env|ANK_AGENT=marie@box/ank-c81a|--label|ank-c81a|--focus"),

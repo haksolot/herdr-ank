@@ -109,6 +109,27 @@ pub struct PluginPane {
     pub pane: Pane,
 }
 
+/// A tab as `tab list` describes it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Tab {
+    pub tab_id: String,
+    #[serde(default)]
+    pub workspace_id: String,
+    #[serde(default)]
+    pub label: Option<String>,
+}
+
+/// A checkout of the repository as `worktree list` describes it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Worktree {
+    pub path: PathBuf,
+    #[serde(default)]
+    pub branch: Option<String>,
+    /// The workspace herdr opened on this checkout; absent once it is closed.
+    #[serde(default)]
+    pub open_workspace_id: Option<String>,
+}
+
 /// `herdr worktree create`.
 #[derive(Debug, Clone)]
 pub struct WorktreeCreate<'a> {
@@ -164,6 +185,16 @@ impl From<ErrorBody> for HerdrError {
 #[derive(Deserialize)]
 struct PaneList {
     panes: Vec<Pane>,
+}
+
+#[derive(Deserialize)]
+struct TabList {
+    tabs: Vec<Tab>,
+}
+
+#[derive(Deserialize)]
+struct WorktreeList {
+    worktrees: Vec<Worktree>,
 }
 
 #[derive(Deserialize)]
@@ -304,6 +335,31 @@ impl Client {
         }
         args.push(if req.focus { "--focus" } else { "--no-focus" }.into());
         Ok(self.run::<RootPane>(args)?.root_pane)
+    }
+
+    pub fn tab_list(&self, workspace: Option<&str>) -> Result<Vec<Tab>, HerdrError> {
+        let mut args = argv(["tab", "list"]);
+        if let Some(workspace) = workspace {
+            args.push("--workspace".into());
+            args.push(workspace.into());
+        }
+        Ok(self.run::<TabList>(args)?.tabs)
+    }
+
+    pub fn tab_close(&self, tab: &str) -> Result<(), HerdrError> {
+        self.run_unit(argv(["tab", "close", tab]))
+    }
+
+    /// The checkouts of the repository `workspace` is open on.
+    pub fn worktree_list(&self, workspace: &str) -> Result<Vec<Worktree>, HerdrError> {
+        let args = argv(["worktree", "list", "--workspace", workspace]);
+        Ok(self.run::<WorktreeList>(args)?.worktrees)
+    }
+
+    /// Removes the checkout `workspace` is open on, and that workspace with
+    /// its tabs; never `--force`, so herdr refuses a checkout with changes.
+    pub fn worktree_remove(&self, workspace: &str) -> Result<(), HerdrError> {
+        self.run_unit(argv(["worktree", "remove", "--workspace", workspace]))
     }
 
     /// Creates a tab; returns its root pane.

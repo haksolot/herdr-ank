@@ -5,7 +5,9 @@
 //! This is the only module that spawns git, the `git` on `PATH` with
 //! `-C <path>`, and only for the operations the ADR lists. Every precondition
 //! is read before the first write; a rebase that stops on a conflict is
-//! aborted. Nothing is cleaned up here: no branch, worktree or tab is removed.
+//! aborted. [`land`] cleans nothing up; the action ([`action`]) removes the
+//! branch after a landing through [`delete_branch`] and
+//! [`delete_remote_branch`], and never pushes anything else.
 
 use std::fmt;
 use std::io;
@@ -13,6 +15,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use crate::ank::Found;
+
+pub mod action;
 
 /// What a landing works on.
 #[derive(Debug, Clone, Copy)]
@@ -112,6 +116,83 @@ pub fn land(request: &Request) -> Result<Landing, LandError> {
         }
     }
     Ok(Landing::FastForwardRefused)
+}
+
+/// `TASK-abcd00000000` -> `TASK-abcd`: the short id `work` names the branch
+/// and the agent after.
+pub fn short(id: &str) -> String {
+    match id.split_once('-') {
+        Some((kind, rest)) => format!("{kind}-{}", rest.get(..4).unwrap_or(rest)),
+        None => id.to_owned(),
+    }
+}
+
+/// `TASK-abcd00000000` -> `task/abcd`.
+pub fn task_branch(id: &str) -> String {
+    format!("task/{}", crate::work::short_id(&short(id)))
+}
+
+/// The tree the default branch moves in: the main checkout of the repository
+/// `path` belongs to, `path` itself when it is that checkout.
+pub fn integration_tree(path: &Path) -> Result<PathBuf, LandError> {
+    let common = PathBuf::from(Git(path).read(&[
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir",
+    ])?);
+    let main = common.parent().unwrap_or(&common).to_path_buf();
+    // Keep the caller's spelling of the same directory: git writes its own.
+    match (path.canonicalize(), main.canonicalize()) {
+        (Ok(a), Ok(b)) if a == b => Ok(path.to_path_buf()),
+        _ => Ok(main),
+    }
+}
+
+/// Whether `branch` exists in `integration` and is not yet contained in
+/// `default_branch`: what is left to land.
+pub fn unlanded(integration: &Path, branch: &str, default_branch: &str) -> Result<bool, LandError> {
+    let git = Git(integration);
+    let local = format!("refs/heads/{branch}");
+    if !git
+        .output(&["rev-parse", "--verify", "--quiet", &local])?
+        .status
+        .success()
+    {
+        return Ok(false);
+    }
+    let args = ["merge-base", "--is-ancestor", &local, default_branch];
+    let output = git.output(&args)?;
+    match output.status.code() {
+        Some(0) => Ok(false),
+        Some(1) => Ok(true),
+        _ => Err(LandError::Git {
+            args: args.join(" "),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        }),
+    }
+}
+
+/// `branch -d <branch>` in the integration tree: git refuses a branch that is
+/// not merged or that a worktree still has checked out.
+pub fn delete_branch(integration: &Path, branch: &str) -> Result<(), LandError> {
+    Git(integration).read(&["branch", "-d", branch]).map(drop)
+}
+
+/// `push origin --delete <branch>`, only when `ls-remote` finds the branch on
+/// origin: false when it was not there.
+pub fn delete_remote_branch(integration: &Path, branch: &str) -> Result<bool, LandError> {
+    let git = Git(integration);
+    let found = git.read(&[
+        "ls-remote",
+        "--heads",
+        "origin",
+        &format!("refs/heads/{branch}"),
+    ])?;
+    if found.is_empty() {
+        return Ok(false);
+    }
+    git.read(&["push", "origin", "--delete", branch])?;
+    Ok(true)
 }
 
 /// `git -C <path>`.

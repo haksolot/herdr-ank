@@ -326,20 +326,30 @@ fn only_src_land_runs_git_and_only_the_operations_the_adr_lists() {
             );
             continue;
         }
-        for forbidden in ["push", "tag", "--force", "--no-ff", "checkout", "reset"] {
+        for forbidden in ["tag", "--force", "--no-ff", "checkout", "reset", "-D"] {
             assert!(
                 !text.contains(&format!("\"{forbidden}\"")),
                 "{} names {forbidden}",
                 file.display()
             );
         }
-        for call in text.split("(&[").skip(1) {
-            let verb = call.split('"').nth(1).unwrap_or_default();
-            assert!(
-                ["status", "rev-parse", "rebase", "merge"].contains(&verb),
-                "{} runs git {verb}",
-                file.display()
-            );
+        // Every argv handed to git: `git.read(&[...])`, `git.output(&[...])`,
+        // or bound first with `let args = [...]`.
+        let calls = text
+            .split("(&[\"")
+            .skip(1)
+            .chain(text.split("args = [\"").skip(1));
+        for call in calls {
+            let verb = call.split('"').next().unwrap_or_default();
+            let args = call.split(']').next().unwrap_or_default();
+            let allowed = match verb {
+                "status" | "rev-parse" | "rebase" | "merge" | "merge-base" | "ls-remote" => true,
+                "branch" => args.starts_with(r#"branch", "-d""#),
+                "push" => args.starts_with(r#"push", "origin", "--delete""#),
+                // An argv for ank, e.g. `find(&["--type", ...])`.
+                _ => verb.starts_with('-'),
+            };
+            assert!(allowed, "{} runs git {args}", file.display());
         }
     }
 }

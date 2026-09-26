@@ -19,7 +19,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use herdr_ank::herdr::{
-    subscribe_over, Client, Event, HerdrError, Sound, Subscription, TabCreate, WorktreeCreate,
+    subscribe_over, Client, Event, HerdrError, Sound, Subscription, Tab, TabCreate, Worktree,
+    WorktreeCreate,
 };
 
 mod support;
@@ -827,4 +828,92 @@ fn a_verb_whose_result_is_read_still_fails_on_an_empty_stdout() {
         fake.client().pane_list(None),
         Err(HerdrError::Decode(_))
     ));
+}
+
+#[test]
+fn tab_list_passes_the_workspace_and_decodes_tabs() {
+    let fake = FakeHerdr::answering(
+        "tab-list",
+        r#"{"id":"cli:tab:list","result":{"tabs":[{"agent_status":"idle","focused":false,"label":"1","number":5,"pane_count":1,"tab_id":"w3A:t5","workspace_id":"w3A"},{"agent_status":"working","focused":true,"label":"ank-a23f","number":9,"pane_count":1,"tab_id":"w3A:t9","workspace_id":"w3A","a_field_herdr_added_later":1}],"type":"tab_list"}}"#,
+    );
+    let tabs = fake.client().tab_list(Some("w3A")).unwrap();
+    assert_eq!(fake.argv(), ["tab", "list", "--workspace", "w3A"]);
+    assert_eq!(
+        tabs,
+        [
+            Tab {
+                tab_id: "w3A:t5".into(),
+                workspace_id: "w3A".into(),
+                label: Some("1".into()),
+            },
+            Tab {
+                tab_id: "w3A:t9".into(),
+                workspace_id: "w3A".into(),
+                label: Some("ank-a23f".into()),
+            },
+        ]
+    );
+    let fake = FakeHerdr::answering(
+        "tab-list-all",
+        r#"{"id":"cli:tab:list","result":{"tabs":[],"type":"tab_list"}}"#,
+    );
+    assert!(fake.client().tab_list(None).unwrap().is_empty());
+    assert_eq!(fake.argv(), ["tab", "list"]);
+}
+
+#[test]
+fn tab_close_names_the_tab() {
+    let fake = FakeHerdr::answering(
+        "tab-close",
+        r#"{"id":"cli:tab:close","result":{"type":"ok"}}"#,
+    );
+    fake.client().tab_close("w3A:t9").unwrap();
+    assert_eq!(fake.argv(), ["tab", "close", "w3A:t9"]);
+}
+
+#[test]
+fn tab_close_of_an_unknown_tab_is_an_api_error() {
+    let fake = FakeHerdr::failing(
+        "tab-close-unknown",
+        r#"{"error":{"code":"tab_not_found","message":"tab w3A:t99 not found"},"id":"cli:tab:close"}"#,
+    );
+    match fake.client().tab_close("w3A:t99") {
+        Err(HerdrError::Api { code, .. }) => assert_eq!(code, "tab_not_found"),
+        other => panic!("expected an api error, got {other:?}"),
+    }
+}
+
+#[test]
+fn worktree_list_passes_the_workspace_and_decodes_each_open_workspace() {
+    let fake = FakeHerdr::answering(
+        "worktree-list",
+        r#"{"id":"cli:worktree:list","result":{"source":{"repo_root":"/src/repo","source_workspace_id":"w3A"},"type":"worktree_list","worktrees":[{"branch":"main","is_bare":false,"is_detached":false,"is_linked_worktree":false,"is_prunable":false,"label":"repo","open_workspace_id":"w3A","path":"/src/repo"},{"branch":"task/a23f","is_linked_worktree":true,"label":"repo","path":"/wt/ank-a23f"}]}}"#,
+    );
+    let worktrees = fake.client().worktree_list("w3A").unwrap();
+    assert_eq!(fake.argv(), ["worktree", "list", "--workspace", "w3A"]);
+    assert_eq!(
+        worktrees,
+        [
+            Worktree {
+                path: "/src/repo".into(),
+                branch: Some("main".into()),
+                open_workspace_id: Some("w3A".into()),
+            },
+            Worktree {
+                path: "/wt/ank-a23f".into(),
+                branch: Some("task/a23f".into()),
+                open_workspace_id: None,
+            },
+        ]
+    );
+}
+
+#[test]
+fn worktree_remove_names_the_worktree_workspace_and_never_forces() {
+    let fake = FakeHerdr::answering(
+        "worktree-remove",
+        r#"{"id":"cli:worktree:remove","result":{"forced":false,"path":"/wt/ank-a23f","type":"worktree_removed","workspace_id":"w3H"}}"#,
+    );
+    fake.client().worktree_remove("w3H").unwrap();
+    assert_eq!(fake.argv(), ["worktree", "remove", "--workspace", "w3H"]);
 }
