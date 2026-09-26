@@ -428,3 +428,133 @@ fn a_sync_reports_the_workspace_counts_even_without_an_agent_pane() {
         "a pane without an agent got a pane report: {calls:#?}"
     );
 }
+
+/// The calls the fake recorded in `bin`, without a last line it is still
+/// writing: the daemon runs while the test reads.
+fn calls_so_far(bin: &std::path::Path) -> Vec<support::Call> {
+    fs::read_to_string(bin.join("calls.jsonl"))
+        .unwrap_or_default()
+        .split_inclusive('\n')
+        .filter(|line| line.ends_with('\n'))
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect()
+}
+
+/// Starts `herdr-ank daemon` on `state_dir` against the fake herdr of `bin/`,
+/// waits for its first sync (`pane list`, which comes after the welcome),
+/// stops it and hands back what herdr was asked.
+fn daemon_start(state_dir: &std::path::Path, bin: &std::path::Path) -> Vec<support::Call> {
+    let herdr = bin.join(format!("herdr{}", std::env::consts::EXE_SUFFIX));
+    let before = calls_so_far(bin).len();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_herdr-ank"))
+        .arg("daemon")
+        .env("PATH", bin)
+        .env("HERDR_BIN_PATH", &herdr)
+        .env("HERDR_SOCKET_PATH", state_dir.join("absent.sock"))
+        .env("HERDR_PLUGIN_CONFIG_DIR", state_dir)
+        .env("HERDR_PLUGIN_STATE_DIR", state_dir)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let started = Instant::now();
+    let synced = loop {
+        let calls = calls_so_far(bin);
+        if calls[before.min(calls.len())..]
+            .iter()
+            .any(|c| c.argv.starts_with(&["pane".into(), "list".into()]))
+        {
+            break true;
+        }
+        if child.try_wait().unwrap().is_some() || started.elapsed() > Duration::from_secs(10) {
+            break false;
+        }
+        std::thread::sleep(ms(20));
+    };
+    let _ = child.kill();
+    let _ = child.wait();
+    assert!(synced, "the daemon never ran its first sync");
+    calls_so_far(bin).split_off(before)
+}
+
+/// A state dir and a `bin/` holding the fake herdr and ank; `notification
+/// show` answers `notify_code`.
+fn welcome_setup(name: &str, notify_code: u8) -> (PathBuf, PathBuf) {
+    let dir = tempdir(name);
+    let bin = dir.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    support::link(&bin, "herdr");
+    support::link(&bin, "ank");
+    let refused = r#"{"error":{"code":"internal","message":"no"},"id":"cli:notification:show"}"#;
+    support::write_answers(
+        &bin,
+        &[support::answer(
+            &["notification", "show"],
+            "",
+            if notify_code == 0 { "" } else { refused },
+            notify_code,
+        )],
+    );
+    let state = dir.join("state");
+    fs::create_dir_all(&state).unwrap();
+    (state, bin)
+}
+
+fn notifications(calls: &[support::Call]) -> Vec<&support::Call> {
+    calls
+        .iter()
+        .filter(|c| c.argv.starts_with(&["notification".into(), "show".into()]))
+        .collect()
+}
+
+fn state_files(state: &std::path::Path) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(state)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n != "daemon.lock")
+        .collect();
+    names.sort();
+    names
+}
+
+#[test]
+fn the_first_daemon_start_sends_one_welcome_naming_the_sidebar_tokens() {
+    let (state, bin) = welcome_setup("welcome-first", 0);
+    let calls = daemon_start(&state, &bin);
+
+    let told = notifications(&calls);
+    assert_eq!(told.len(), 1, "{calls:#?}");
+    let argv = &told[0].argv;
+    let title = &argv[2];
+    assert!(title.contains("ank"), "{argv:?}");
+    let body = &argv[argv.iter().position(|a| a == "--body").expect("a body") + 1];
+    for token in [
+        "$ank_task",
+        "$ank_expires",
+        "$ank_title",
+        "README",
+        "Sidebar",
+    ] {
+        assert!(body.contains(token), "the body names {token}: {body}");
+    }
+    assert_eq!(state_files(&state), ["welcomed"], "a marker is left");
+}
+
+#[test]
+fn a_later_daemon_start_sends_no_welcome() {
+    let (state, bin) = welcome_setup("welcome-again", 0);
+    daemon_start(&state, &bin);
+    let calls = daemon_start(&state, &bin);
+    assert!(notifications(&calls).is_empty(), "{calls:#?}");
+}
+
+#[test]
+fn a_welcome_herdr_refused_leaves_no_marker_and_is_sent_again() {
+    let (state, bin) = welcome_setup("welcome-refused", 1);
+    let calls = daemon_start(&state, &bin);
+    assert_eq!(notifications(&calls).len(), 1, "{calls:#?}");
+    assert!(state_files(&state).is_empty(), "{:?}", state_files(&state));
+
+    let calls = daemon_start(&state, &bin);
+    assert_eq!(notifications(&calls).len(), 1, "sent again: {calls:#?}");
+}

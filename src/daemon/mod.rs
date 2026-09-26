@@ -17,11 +17,19 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::ank;
 use crate::config::Config;
-use crate::herdr::{self, Event, Subscription};
+use crate::herdr::{self, Event, Sound, Subscription};
 use crate::notify::{Notifier, Observed};
 use crate::sync::{self, Corpus};
 
 const LOCK_FILE: &str = "daemon.lock";
+
+/// Left in the state dir once the welcome was shown, so it is shown once.
+const WELCOME_MARKER: &str = "welcomed";
+
+const WELCOME_TITLE: &str = "ank suit vos agents";
+
+const WELCOME_BODY: &str = "La sidebar peut afficher $ank_task, $ank_expires et $ank_title : \
+voir la section Sidebar du README de herdr-ank.";
 
 /// Syncs are coalesced to one per this gap (ADR-6fb76f3a1197).
 const MIN_GAP: Duration = Duration::from_secs(1);
@@ -170,6 +178,7 @@ pub fn run() -> Result<(), String> {
     };
     let config = Config::load(&env_path("HERDR_PLUGIN_CONFIG_DIR")?).map_err(|e| e.to_string())?;
     let herdr = herdr::Client::from_env().map_err(|e| format!("herdr-ank daemon: {e}"))?;
+    welcome(&herdr, &state_dir);
 
     let (tx, rx) = mpsc::channel::<()>();
     {
@@ -205,6 +214,23 @@ pub fn run() -> Result<(), String> {
             // Both feeders gone: only the poll is left.
             Err(RecvTimeoutError::Disconnected) => thread::sleep(schedule.wait(Instant::now())),
         }
+    }
+}
+
+/// The first daemon of a state dir says once what the sidebar can show. The
+/// marker is left only after herdr took the notification, so a refused one
+/// is tried again at the next start.
+fn welcome(herdr: &herdr::Client, state_dir: &Path) {
+    let marker = state_dir.join(WELCOME_MARKER);
+    if marker.exists() {
+        return;
+    }
+    if let Err(err) = herdr.notification_show(WELCOME_TITLE, Some(WELCOME_BODY), Sound::None) {
+        eprintln!("herdr-ank daemon: welcome: {err}");
+        return;
+    }
+    if let Err(err) = fs::write(&marker, "") {
+        eprintln!("herdr-ank daemon: welcome marker: {err}");
     }
 }
 
