@@ -5,7 +5,7 @@ slug: action-ouvrir-ank-dans-la-palette-ouvre-l-overla
 title: "Action « Ouvrir ank » dans la palette : ouvre l'overlay ank tui du workspace"
 created: 2026-09-26T06:56:21Z
 author: haksolot@vmi3223161
-status: in_progress
+status: done
 scope:
   - herdr-plugin.toml
   - src/tui.rs
@@ -20,6 +20,25 @@ done_criteria: |
 criteria_by: creator
 verify: [cargo-test, clippy, fmt-check]
 method: tdd
+proof:
+  - type: test
+    ref: local/895772c38401@508e485
+    tree: scope/31b6cebfcfe1
+    criteria: 9d236bf34196
+    verifier: cargo-test@f14aeab36e1b
+    via: verifier
+  - type: test
+    ref: local/e3b0c44298fc@508e485
+    tree: scope/31b6cebfcfe1
+    criteria: 9d236bf34196
+    verifier: clippy@d335c02ef52c
+    via: verifier
+  - type: test
+    ref: local/e3b0c44298fc@508e485
+    tree: scope/31b6cebfcfe1
+    criteria: 9d236bf34196
+    verifier: fmt-check@5ca6d10bcd55
+    via: verifier
 schema: 4
-version: 2
+version: 3
 ---
