@@ -25,6 +25,9 @@ pub const TTL_MS: u64 = 90_000;
 
 const TITLE_CHARS: usize = 60;
 
+/// Between the agent and what ank adds to its label: space, U+00B7, space.
+const LABEL_SEPARATOR: &str = " \u{b7} ";
+
 /// One worktree carrying a corpus, as its clients saw it.
 #[derive(Debug, Clone)]
 pub struct Corpus {
@@ -44,6 +47,8 @@ pub struct Corpus {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Report {
     pub pane_id: String,
+    /// `--display-agent`: `<agent> · <short id>` or `<agent> · ank`.
+    pub display_agent: Option<String>,
     pub source: &'static str,
     pub tokens: Vec<(String, String)>,
     pub clear: Vec<String>,
@@ -94,6 +99,7 @@ pub fn plan(panes: &[Pane], agents: &[Pane], corpora: &[Corpus], _config: &Confi
             if TOKENS.iter().any(|t| pane.tokens.contains_key(*t)) {
                 reports.push(Report {
                     pane_id: pane.pane_id.clone(),
+                    display_agent: None,
                     source: SOURCE,
                     tokens: Vec::new(),
                     clear: TOKENS.iter().map(|t| t.to_string()).collect(),
@@ -104,7 +110,18 @@ pub fn plan(panes: &[Pane], agents: &[Pane], corpora: &[Corpus], _config: &Confi
         };
 
         let mut set = BTreeMap::new();
-        if let Some(claim) = attributed(corpus, name) {
+        let claim = attributed(corpus, name);
+        // The label shows herdr's `agent` kind; attribution above read the
+        // agent's name, never this label (SPEC-43438bbcb5ca).
+        let display_agent = pane
+            .agent
+            .as_deref()
+            .filter(|kind| !kind.is_empty())
+            .map(|kind| match &claim {
+                Some(claim) => format!("{kind}{LABEL_SEPARATOR}{}", short_id(claim.id)),
+                None => format!("{kind}{LABEL_SEPARATOR}ank"),
+            });
+        if let Some(claim) = claim {
             set.insert(TASK, short_id(claim.id));
             set.insert(TITLE, claim.title.chars().take(TITLE_CHARS).collect());
             if let Some(minutes) = corpus.expires_in.get(claim.id) {
@@ -125,6 +142,7 @@ pub fn plan(panes: &[Pane], agents: &[Pane], corpora: &[Corpus], _config: &Confi
 
         reports.push(Report {
             pane_id: pane.pane_id.clone(),
+            display_agent,
             source: SOURCE,
             clear: TOKENS
                 .iter()

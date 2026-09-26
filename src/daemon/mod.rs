@@ -208,6 +208,15 @@ pub fn run() -> Result<(), String> {
     }
 }
 
+/// `herdr-ank sync`: one pass, no lock, no notification.
+pub fn sync() -> Result<(), String> {
+    let config = Config::load(&env_path("HERDR_PLUGIN_CONFIG_DIR")?).map_err(|e| e.to_string())?;
+    let herdr = herdr::Client::from_env().map_err(|e| format!("herdr-ank sync: {e}"))?;
+    let (reports, _) = sync_once(&herdr, &config).map_err(|e| format!("herdr-ank sync: {e}"))?;
+    println!("{reports} report(s)");
+    Ok(())
+}
+
 /// Tells what changed since the previous sync. A task is looked up as done
 /// only once its claim has disappeared.
 fn notify(herdr: &herdr::Client, config: &Config, notifier: &mut Notifier, observed: Observed) {
@@ -273,9 +282,13 @@ pub fn sync_once(herdr: &herdr::Client, config: &Config) -> Result<(usize, Obser
             .map(|(k, v)| (k.as_str(), v.as_str()))
             .collect();
         let clear: Vec<&str> = report.clear.iter().map(String::as_str).collect();
-        if let Err(err) =
-            herdr.report_metadata(&report.pane_id, &tokens, &clear, Some(report.ttl_ms))
-        {
+        if let Err(err) = herdr.report_metadata_as(
+            &report.pane_id,
+            report.display_agent.as_deref(),
+            &tokens,
+            &clear,
+            Some(report.ttl_ms),
+        ) {
             eprintln!("herdr-ank daemon: report on {}: {err}", report.pane_id);
         }
     }

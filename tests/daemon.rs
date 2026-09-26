@@ -9,6 +9,8 @@ use std::time::{Duration, Instant};
 
 use herdr_ank::daemon::{minutes_until, Lock, Schedule};
 
+mod support;
+
 static NEXT_DIR: AtomicUsize = AtomicUsize::new(0);
 
 fn tempdir(name: &str) -> PathBuf {
@@ -270,4 +272,103 @@ fn an_event_hook_finding_the_lock_free_becomes_the_daemon() {
     let _ = child.wait();
     assert!(held, "the hook never took the lock");
     assert!(alive, "the hook exited instead of staying as the daemon");
+}
+
+/// One `herdr-ank sync` pass against a fake herdr and a fake ank sharing
+/// `bin/`: the agent pane in the corpus is labelled with `--display-agent`.
+#[test]
+fn a_sync_reports_the_agent_label_with_the_tokens() {
+    let dir = tempdir("sync-label");
+    let bin = dir.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let herdr = support::link(&bin, "herdr");
+    support::link(&bin, "ank");
+    let repo = dir.join("repo");
+    fs::create_dir_all(repo.join(".ank")).unwrap();
+    let pane = serde_json::json!({
+        "pane_id": "w1:p2", "workspace_id": "w1", "tab_id": "w1:t1",
+        "cwd": repo, "agent": "claude", "agent_status": "working",
+        "focused": false, "revision": 1,
+    });
+    let mut agent = pane.clone();
+    agent["name"] = "ank-2".into();
+    let panes = serde_json::json!({ "id": "cli:pane:list",
+        "result": { "type": "pane_list", "panes": [pane] } });
+    let agents = serde_json::json!({ "id": "cli:agent:list",
+        "result": { "type": "agent_list", "agents": [agent] } });
+    let find = serde_json::json!({
+        "contract": 1, "corpus": null, "total": 1, "shown": 1, "hidden": 0,
+        "results": [{
+            "id": "TASK-416cdde27bfb", "kind": "task", "status": "in_progress",
+            "state": "claimed:marie@box/ank-2", "title": "Sync engine",
+            "created": "2026-09-25T16:54:25Z", "archived": false,
+        }],
+    });
+    let context = serde_json::json!({
+        "contract": 1, "mode": "orientation", "head": null, "criteria": null,
+        "method": null, "constraints": [], "proposed": [], "specs": [], "tasks": [],
+        "log": [], "ready": 3, "blocked": 0, "finished_elsewhere": 0, "warnings": [],
+    });
+    let status = fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ank/status.json"),
+    )
+    .unwrap();
+    support::write_answers(
+        &bin,
+        &[
+            support::answer(&["pane", "list"], &panes.to_string(), "", 0),
+            support::answer(&["agent", "list"], &agents.to_string(), "", 0),
+            support::answer(&["find"], &find.to_string(), "", 0),
+            support::answer(&["context"], &context.to_string(), "", 0),
+            support::answer(&["status"], &status, "", 0),
+        ],
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_herdr-ank"))
+        .arg("sync")
+        .env("PATH", &bin)
+        .env("HERDR_BIN_PATH", &herdr)
+        .env("HERDR_SOCKET_PATH", dir.join("herdr.sock"))
+        .env("HERDR_PLUGIN_CONFIG_DIR", &dir)
+        .env("HERDR_PLUGIN_STATE_DIR", &dir)
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let calls = support::calls(&bin);
+    let report = calls
+        .iter()
+        .find(|c| {
+            c.argv
+                .starts_with(&["pane".into(), "report-metadata".into()])
+        })
+        .unwrap_or_else(|| panic!("no pane report-metadata among {calls:#?}"));
+    assert_eq!(
+        report.argv,
+        [
+            "pane",
+            "report-metadata",
+            "w1:p2",
+            "--source",
+            "ank:sync",
+            "--display-agent",
+            "claude · TASK-416c",
+            "--token",
+            "ank_task=TASK-416c",
+            "--token",
+            "ank_title=Sync engine",
+            "--token",
+            "ank_queue=3",
+            "--clear-token",
+            "ank_expires",
+            "--clear-token",
+            "ank_ambiguous",
+            "--ttl-ms",
+            "90000",
+        ]
+    );
 }

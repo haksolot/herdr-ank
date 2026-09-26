@@ -54,6 +54,7 @@ fn main() -> ExitCode {
         Command::Work => run_work(),
         Command::Pick => run_pick(),
         Command::Daemon => herdr_ank::daemon::run(),
+        Command::Sync => herdr_ank::daemon::sync(),
         other => Err(format!("herdr-ank {}: not implemented yet", other.name())),
     };
     match result {

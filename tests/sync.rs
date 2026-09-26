@@ -276,3 +276,68 @@ fn a_fallback_claim_is_ambiguous_only_across_the_panes_it_is_shown_on() {
     assert_eq!(tokens(bare).get("ank_task"), Some(&"TASK-8e7f"));
     assert_eq!(tokens(bare).get("ank_ambiguous"), None, "{bare:#?}");
 }
+
+/// A pane as `pane list` shows one hosting agent `kind` (its `agent` field).
+fn agent_pane(id: &str, cwd: &str, kind: &str) -> Pane {
+    serde_json::from_value(serde_json::json!({
+        "pane_id": id, "workspace_id": "w1", "tab_id": "w1:t1", "cwd": cwd,
+        "agent": kind, "agent_status": "working", "focused": false, "revision": 1,
+    }))
+    .unwrap()
+}
+
+#[test]
+fn an_agent_pane_holding_a_claim_is_labelled_with_its_agent_and_the_short_id() {
+    let panes = [agent_pane("w1:p2", WT, "claude")];
+    let agents = [agent("w1:p2", "ank-2")];
+    let wt = corpus(
+        WT,
+        &[("TASK-416cdde27bfb", "Sync", "haksolot@omarchy/ank-2")],
+        2,
+    );
+
+    let reports = plan(&panes, &agents, &[wt], &Config::default());
+
+    assert_eq!(reports.len(), 1, "{reports:#?}");
+    assert_eq!(
+        reports[0].display_agent.as_deref(),
+        Some("claude · TASK-416c")
+    );
+    assert_eq!(reports[0].ttl_ms, 90_000);
+    assert_eq!(tokens(&reports[0]).get("ank_task"), Some(&"TASK-416c"));
+}
+
+#[test]
+fn an_agent_pane_in_a_corpus_without_its_claim_is_labelled_ank() {
+    let panes = [agent_pane("w1:p1", WT, "codex")];
+    let agents = [agent("w1:p1", "ank-1")];
+    // the claim belongs to ank-2: the label reads herdr's agent name, and
+    // ank-1 is not ank-2 whatever the pane's label says
+    let wt = corpus(
+        WT,
+        &[("TASK-416cdde27bfb", "Sync", "haksolot@omarchy/ank-2")],
+        2,
+    );
+
+    let reports = plan(&panes, &agents, &[wt], &Config::default());
+
+    assert_eq!(reports.len(), 1, "{reports:#?}");
+    assert_eq!(reports[0].display_agent.as_deref(), Some("codex · ank"));
+    assert!(!tokens(&reports[0]).contains_key("ank_task"));
+}
+
+#[test]
+fn no_label_outside_every_corpus_or_without_an_agent_field() {
+    let panes = [
+        agent_pane("w1:p1", "/elsewhere", "claude"),
+        pane("w1:p2", WT, &[]),
+    ];
+    let agents = [agent("w1:p1", "ank-1"), agent("w1:p2", "ank-2")];
+    let wt = corpus(WT, &[], 2);
+
+    let reports = plan(&panes, &agents, &[wt], &Config::default());
+
+    assert!(reports.iter().all(|r| r.pane_id != "w1:p1"), "{reports:#?}");
+    let p2 = reports.iter().find(|r| r.pane_id == "w1:p2").unwrap();
+    assert_eq!(p2.display_agent, None);
+}
