@@ -59,10 +59,8 @@ fn fake_herdr(dir: &Path, state: &Path, pick: &str) -> herdr::Client {
     let pane = |id: &str| PANE.replace("PANE", id);
     let mut picked = support::answer(
         &["plugin", "pane"],
-        &format!(
-            r#"{{"id":"cli:plugin","result":{{"type":"plugin_pane_opened","plugin_pane":{{"plugin_id":"ank","entrypoint":"pick","pane":{}}}}}}}"#,
-            pane("w1:p-pick")
-        ),
+        // As herdr 0.9.1 answers a popup: no pane is described.
+        r#"{"id":"cli:plugin","result":{"type":"ok"}}"#,
         "",
         0,
     );

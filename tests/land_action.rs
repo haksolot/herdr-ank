@@ -129,6 +129,14 @@ fn row(id: &str, status: &str, title: &str) -> Value {
            "created": "2026-09-26T00:00:00Z", "archived": false})
 }
 
+/// A task finished on its branch, as the integration tree's corpus sees it
+/// until it lands: still open there, with the proof on the branch.
+fn finished(id: &str, title: &str) -> Value {
+    let mut row = row(id, "open", title);
+    row["state"] = json!(format!("finished:1234567 on {BRANCH}"));
+    row
+}
+
 fn find(rows: &[Value]) -> String {
     json!({"contract": 1, "corpus": null, "total": rows.len(), "shown": rows.len(),
            "hidden": 0, "results": rows})
@@ -180,7 +188,8 @@ fn fake_herdr(s: &Paths, pick: &str, extra: &[Value]) -> herdr::Client {
     let bin = support::link(&home, "herdr");
     let mut picked = support::answer(
         &["plugin", "pane"],
-        r#"{"id":"cli","result":{"type":"plugin_pane_opened","plugin_pane":{"plugin_id":"ank","entrypoint":"pick","pane":{"pane_id":"w1:p-pick"}}}}"#,
+        // As herdr 0.9.1 answers a popup: no pane is described.
+        r#"{"id":"cli:plugin","result":{"type":"ok"}}"#,
         "",
         0,
     );
@@ -222,8 +231,18 @@ fn setup_with(name: &str, pick: &str, status: &str, extra_herdr: &[Value]) -> Se
     let (repo, worktree, origin) = repos(&dir);
     let state = dir.join("state");
     fs::create_dir_all(&state).unwrap();
+    // The integration tree's corpus sees the task finished elsewhere; the
+    // fake answering `--repo <dir>/wt/ank-abcd` has its home in `<dir>/wt`,
+    // and answers with the task's `status` as its own branch holds it.
     support::write_answers(
         &dir,
+        &[
+            support::answer(&["status"], STATUS, "", 0),
+            support::answer(&["find"], &find(&[finished(ID, "a task")]), "", 0),
+        ],
+    );
+    support::write_answers(
+        &dir.join("wt"),
         &[
             support::answer(&["status"], STATUS, "", 0),
             support::answer(&["find"], &find(&[row(ID, status, "a task")]), "", 0),
@@ -485,10 +504,13 @@ fn a_cancelled_pick_lands_nothing() {
 #[test]
 fn the_land_picker_lists_only_done_tasks_with_an_unlanded_branch() {
     let s = setup("landable");
-    // task/ef01 is done and already in main; task/9999 has no branch; the
-    // open task has one but is not done.
+    // TASK-abcd is finished on its branch, which the integration tree's
+    // corpus reads as open; TASK-5555 is done there, its branch not in main
+    // yet. task/ef01 is done and already in main; task/9999 has no branch;
+    // the open task has one but is not done.
     git(&s.repo, &["branch", "task/ef01", "main"]);
     git(&s.repo, &["branch", "task/7777", BRANCH]);
+    git(&s.repo, &["branch", "task/5555", BRANCH]);
     support::write_answers(
         &s.dir,
         &[
@@ -496,7 +518,8 @@ fn the_land_picker_lists_only_done_tasks_with_an_unlanded_branch() {
             support::answer(
                 &["find"],
                 &find(&[
-                    row(ID, "done", "Land me"),
+                    finished(ID, "Land me"),
+                    row("TASK-555500000000", "done", "Land me too"),
                     row("TASK-ef0100000000", "done", "Landed already"),
                     row("TASK-999900000000", "done", "No branch"),
                     row("TASK-777700000000", "open", "Not done"),
@@ -512,13 +535,19 @@ fn the_land_picker_lists_only_done_tasks_with_an_unlanded_branch() {
         .iter()
         .map(|t| (t.id.as_str(), t.short.as_str(), t.title.as_str()))
         .collect();
-    assert_eq!(rows, [(ID, "TASK-abcd", "Land me")]);
+    assert_eq!(
+        rows,
+        [
+            (ID, "TASK-abcd", "Land me"),
+            ("TASK-555500000000", "TASK-5555", "Land me too")
+        ]
+    );
     let ank_calls = support::calls(&s.dir);
     let find = ank_calls
         .iter()
         .find(|c| c.argv[0] == "find")
         .expect("ank find was run");
-    assert_eq!(find.argv[1..5], ["--type", "task", "--status", "done"]);
+    assert_eq!(find.argv[1..4], ["--type", "task", "--json"]);
 }
 
 #[test]

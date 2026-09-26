@@ -209,7 +209,8 @@ struct RootPane {
 
 #[derive(Deserialize)]
 struct PluginPaneOpened {
-    plugin_pane: PluginPane,
+    #[serde(default)]
+    plugin_pane: Option<PluginPane>,
 }
 
 #[derive(Deserialize)]
@@ -402,12 +403,15 @@ impl Client {
 
     /// Opens this plugin's pane `entrypoint`, focused, at the placement its
     /// manifest declares: the CLI's `--placement` does not take `popup`.
+    /// herdr 0.9.1 describes a split pane it opened, but answers a popup or an
+    /// overlay with a bare `ok` and refuses `--workspace` for them: they open
+    /// over the active pane, and this returns `None`.
     pub fn plugin_pane_open(
         &self,
         entrypoint: &str,
         workspace: Option<&str>,
         env: &[(&str, &str)],
-    ) -> Result<PluginPane, HerdrError> {
+    ) -> Result<Option<PluginPane>, HerdrError> {
         let mut args = argv([
             "plugin",
             "pane",

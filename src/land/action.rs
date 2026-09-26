@@ -131,16 +131,19 @@ struct Invocation {
 
 /// What the land picker lists: the done tasks of the corpus at `ank`'s repo
 /// whose branch `task/<short id>` exists and is not yet in the default branch.
+/// Until it lands, the integration tree reads a task finished on its branch
+/// as open, in the state `finished:<sha> on <branch>`: that counts as done.
 pub fn landable_tasks(ank: &ank::Client) -> Result<Vec<ContextTask>, ActionError> {
     let default_branch = ank
         .status()?
         .default_branch
         .ok_or(ActionError::NoDefaultBranch)?;
     let integration = landing::integration_tree(ank.repo())?;
-    let found = ank.find(&["--type", "task", "--status", "done"])?;
+    let found = ank.find(&["--type", "task"])?;
     let mut tasks = Vec::new();
     for row in found.results {
-        if row.status != "done"
+        let done = row.status == "done" || row.state.starts_with("finished:");
+        if !done
             || !landing::unlanded(
                 &integration,
                 &landing::task_branch(&row.id),
@@ -185,12 +188,6 @@ pub fn run(land: &Land) -> Result<Outcome, ActionError> {
     else {
         return Ok(Outcome::Cancelled);
     };
-    let task = ank
-        .find(&[&id])?
-        .results
-        .into_iter()
-        .find(|row| row.id == id)
-        .ok_or_else(|| ActionError::UnknownTask(id.clone()))?;
     let default_branch = ank
         .status()?
         .default_branch
@@ -208,6 +205,13 @@ pub fn run(land: &Land) -> Result<Outcome, ActionError> {
         return refuse(land, id, &short, cause, &remedy);
     };
 
+    // The task as its own branch holds it: done there before it lands.
+    let task = ank::Client::with_program(&land.ank_program, &worktree.path)
+        .find(&[&id])?
+        .results
+        .into_iter()
+        .find(|row| row.id == id)
+        .ok_or_else(|| ActionError::UnknownTask(id.clone()))?;
     let request = Request {
         integration: &integration,
         worktree: &worktree.path,

@@ -725,8 +725,23 @@ fn plugin_pane_open_names_the_entrypoint_and_returns_the_opened_pane() {
             "--focus"
         ]
     );
+    let opened = opened.expect("a split pane is described");
     assert_eq!(opened.entrypoint, "pick");
     assert_eq!(opened.pane.pane_id, "w1:p2");
+}
+
+#[test]
+fn plugin_pane_open_of_a_popup_succeeds_on_herdrs_bare_ok() {
+    // herdr 0.9.1 opens a popup over the active pane and answers only "ok".
+    let fake = FakeHerdr::answering(
+        "plugin-pane-popup",
+        r#"{"id":"cli:plugin","result":{"type":"ok"}}"#,
+    );
+    let opened = fake
+        .client()
+        .plugin_pane_open("pick", None, &[("HERDR_ANK_REPO", "/src/repo")])
+        .expect("a bare ok is a popup opened");
+    assert_eq!(opened, None);
 }
 
 #[test]
