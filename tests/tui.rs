@@ -40,8 +40,9 @@ fn the_tui_runs_ank_tui_in_the_corpus_and_exits_with_its_code() {
     assert_eq!(calls[0].argv, ["tui"]);
 }
 
-/// What herdr 0.9.1 prints for `plugin pane open` of the tui overlay.
-const TUI_OPENED: &str = r#"{"id":"cli:plugin","result":{"type":"plugin_pane_opened","plugin_pane":{"plugin_id":"ank","entrypoint":"tui","pane":{"pane_id":"w7:p3","workspace_id":"w7","tab_id":"w7:t1","agent_status":"unknown","focused":true,"revision":1}}}}"#;
+/// What herdr 0.9.1 prints for `plugin pane open` of the tui overlay: a bare
+/// `ok`, no pane described.
+const TUI_OPENED: &str = r#"{"id":"cli:plugin","result":{"type":"ok"}}"#;
 
 fn open(dir: &Path, context: Option<&str>) -> std::process::Output {
     let bin = dir.join("bin");
@@ -76,52 +77,72 @@ fn fake_herdr(dir: &Path) -> PathBuf {
     bin
 }
 
+/// herdr 0.9.1 answers `invalid_params` « overlay and popup plugin panes
+/// target the active pane » when `--workspace` is passed: the overlay opens
+/// over the active pane, so the context's workspace, present or not, is not
+/// sent.
 #[test]
-fn open_asks_herdr_for_the_tui_overlay_of_the_invoking_workspace() {
-    let dir = scratch("open");
-    let bin = fake_herdr(&dir);
-    let context = r#"{"workspace_id":"w7","workspace_cwd":"/nowhere","later_field":1}"#;
-
-    let output = open(&dir, Some(context));
-
-    assert_eq!(
-        output.status.code(),
-        Some(0),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let calls = support::calls(&bin);
-    assert_eq!(calls.len(), 1, "{calls:?}");
-    assert_eq!(
-        calls[0].argv,
-        [
-            "plugin",
-            "pane",
-            "open",
-            "--plugin",
-            "ank",
-            "--entrypoint",
-            "tui",
-            "--workspace",
-            "w7",
-            "--focus"
-        ]
-    );
-}
-
-#[test]
-fn open_without_a_workspace_exits_1_naming_it_and_calls_nothing() {
-    for context in [None, Some(r#"{"workspace_cwd":"/home/me/repo"}"#)] {
-        let dir = scratch(&format!("open-none-{}", context.is_some()));
+fn open_asks_herdr_for_the_tui_overlay_over_the_active_pane() {
+    for (name, context) in [
+        (
+            "workspace",
+            Some(r#"{"workspace_id":"w7","workspace_cwd":"/nowhere","later_field":1}"#),
+        ),
+        ("cwd-only", Some(r#"{"workspace_cwd":"/home/me/repo"}"#)),
+        ("none", None),
+    ] {
+        let dir = scratch(&format!("open-{name}"));
         let bin = fake_herdr(&dir);
 
         let output = open(&dir, context);
 
-        assert_eq!(output.status.code(), Some(1), "context {context:?}");
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(stderr.contains("workspace"), "{stderr}");
-        assert!(support::calls(&bin).is_empty());
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "context {context:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let calls = support::calls(&bin);
+        assert_eq!(calls.len(), 1, "{calls:?}");
+        assert_eq!(
+            calls[0].argv,
+            [
+                "plugin",
+                "pane",
+                "open",
+                "--plugin",
+                "ank",
+                "--entrypoint",
+                "tui",
+                "--focus"
+            ],
+            "context {context:?}"
+        );
     }
+}
+
+#[test]
+fn open_exits_1_naming_the_pane_when_herdr_refuses() {
+    let dir = scratch("open-refused");
+    let bin = dir.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    support::link(&bin, "herdr");
+    support::write_answers(
+        &bin,
+        &[support::answer(
+            &["plugin", "pane", "open"],
+            "",
+            r#"{"error":{"code":"invalid_params","message":"overlay and popup plugin panes target the active pane"}}"#,
+            1,
+        )],
+    );
+
+    let output = open(&dir, None);
+
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("tui"), "{stderr}");
+    assert!(stderr.contains("active pane"), "{stderr}");
 }
 
 #[test]

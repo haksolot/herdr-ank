@@ -13,7 +13,6 @@ use serde::Deserialize;
 /// others are ignored.
 #[derive(Deserialize)]
 struct Context {
-    workspace_id: Option<String>,
     workspace_cwd: Option<PathBuf>,
     worktree: Option<Worktree>,
 }
@@ -34,31 +33,16 @@ pub fn start_dir(context_json: &str) -> Option<PathBuf> {
         .or(context.workspace_cwd)
 }
 
-/// The workspace the action was invoked from, if the context names one.
-pub fn workspace_id(context_json: &str) -> Option<String> {
-    serde_json::from_str::<Context>(context_json)
-        .ok()?
-        .workspace_id
-}
-
-/// Opens this plugin's `tui` overlay over the invoking workspace, through
-/// `$HERDR_BIN_PATH` (ADR-357c017baf9b). Exits 1 without a workspace.
+/// Opens this plugin's `tui` overlay over the active pane, through
+/// `$HERDR_BIN_PATH` (ADR-357c017baf9b). No `--workspace`: herdr 0.9.1
+/// refuses it for an overlay, and answers a bare `ok`.
 pub fn open() -> ExitCode {
-    let context = std::env::var("HERDR_PLUGIN_CONTEXT_JSON").unwrap_or_default();
-    let Some(workspace) = workspace_id(&context) else {
-        eprintln!(
-            "herdr-ank open: HERDR_PLUGIN_CONTEXT_JSON names no workspace_id; invoke this action from a herdr workspace"
-        );
-        return ExitCode::from(1);
-    };
     let opened = crate::herdr::Client::from_env()
-        .and_then(|herdr| herdr.plugin_pane_open(TUI_PANE, Some(&workspace), &[]));
+        .and_then(|herdr| herdr.plugin_pane_open(TUI_PANE, None, &[]));
     match opened {
         Ok(_) => ExitCode::SUCCESS,
         Err(err) => {
-            eprintln!(
-                "herdr-ank open: cannot open the {TUI_PANE} pane in workspace {workspace}: {err}"
-            );
+            eprintln!("herdr-ank open: cannot open the {TUI_PANE} pane: {err}");
             ExitCode::from(1)
         }
     }
