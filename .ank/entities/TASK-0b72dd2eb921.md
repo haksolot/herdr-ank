@@ -5,7 +5,7 @@ slug: herdr-ank-setup-ajoute-une-fois-au-config-toml-d
 title: "herdr-ank setup : ajoute une fois au config.toml de herdr le raccourci prefix+a d'Ouvrir ank et les lignes de sidebar, et le README cesse de citer une palette que herdr 0.9.1 n'a pas"
 created: 2026-09-26T23:12:00Z
 author: haksolot@vmi3223161/ank-plan
-status: in_progress
+status: done
 scope:
   - src/setup.rs
   - tests/setup.rs
@@ -20,8 +20,27 @@ done_criteria: |
 criteria_by: creator
 verify: [cargo-test, clippy, fmt-check]
 method: tdd
+proof:
+  - type: test
+    ref: local/97a31944ddc3@5c5c013
+    tree: scope/40ad728fe656
+    criteria: da372ce1331b
+    verifier: cargo-test@f14aeab36e1b
+    via: verifier
+  - type: test
+    ref: local/e3b0c44298fc@5c5c013
+    tree: scope/40ad728fe656
+    criteria: da372ce1331b
+    verifier: clippy@d335c02ef52c
+    via: verifier
+  - type: test
+    ref: local/e3b0c44298fc@5c5c013
+    tree: scope/40ad728fe656
+    criteria: da372ce1331b
+    verifier: fmt-check@5ca6d10bcd55
+    via: verifier
 schema: 4
-version: 2
+version: 3
 ---
 
 ## Pourquoi
