@@ -186,7 +186,7 @@ pub fn run() -> Result<(), String> {
         let tx = tx.clone();
         thread::spawn(move || subscribe_forever(&herdr, &tx));
     }
-    if let Ok(events) = ank::events_jsonl(Path::new("ank")) {
+    if let Ok(events) = ank::events_jsonl(&ank::program()) {
         let tx = tx.clone();
         thread::spawn(move || tail_forever(&events, &tx));
     }

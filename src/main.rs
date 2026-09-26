@@ -89,7 +89,7 @@ fn run_work() -> Result<(), String> {
         config::Config::load(&env_path("HERDR_PLUGIN_CONFIG_DIR")?).map_err(|e| e.to_string())?;
     let work = work::Work {
         herdr: herdr::Client::from_env().map_err(|e| e.to_string())?,
-        ank_program: "ank".into(),
+        ank_program: ank::program(),
         context_json: std::env::var("HERDR_PLUGIN_CONTEXT_JSON").unwrap_or_default(),
         state_dir: env_path("HERDR_PLUGIN_STATE_DIR")?,
         worktrees_root: env_path(HOME)?.join(".herdr").join("worktrees"),

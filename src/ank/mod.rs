@@ -38,9 +38,9 @@ pub struct Client {
 }
 
 impl Client {
-    /// A client running the `ank` found on `PATH`.
+    /// A client running the `ank` [`program`] finds.
     pub fn new(repo: &Path) -> Self {
-        Self::with_program("ank", repo)
+        Self::with_program(program(), repo)
     }
 
     /// A client running the given `ank` binary.
@@ -171,13 +171,53 @@ pub fn events_jsonl(program: &Path) -> Result<PathBuf, AnkError> {
         .join("events.jsonl"))
 }
 
+/// The `ank` every call of the plugin runs, looked up once. herdr often runs
+/// as a service whose `PATH` lacks the user's own bin directories, so `PATH`
+/// comes first and then where ank is usually installed: next to herdr,
+/// `<home>/.local/bin`, `<home>/.cargo/bin`, and on Unix `/opt/homebrew/bin`
+/// and `/usr/local/bin`. Found nowhere, it is plain `ank`, and running it
+/// fails as it always did.
+pub fn program() -> PathBuf {
+    static PROGRAM: OnceLock<PathBuf> = OnceLock::new();
+    PROGRAM.get_or_init(locate).clone()
+}
+
+fn locate() -> PathBuf {
+    let name = format!("ank{}", std::env::consts::EXE_SUFFIX);
+    let mut dirs: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|path| std::env::split_paths(&path).collect())
+        .unwrap_or_default();
+    if let Some(herdr) = std::env::var_os("HERDR_BIN_PATH") {
+        if let Some(dir) = Path::new(&herdr).parent() {
+            if !dir.as_os_str().is_empty() {
+                dirs.push(dir.to_path_buf());
+            }
+        }
+    }
+    let home = std::env::var_os("HOME")
+        .filter(|home| !home.is_empty())
+        .or_else(|| std::env::var_os("USERPROFILE").filter(|home| !home.is_empty()));
+    if let Some(home) = home.map(PathBuf::from) {
+        dirs.push(home.join(".local").join("bin"));
+        dirs.push(home.join(".cargo").join("bin"));
+    }
+    if cfg!(unix) {
+        dirs.push(PathBuf::from("/opt/homebrew/bin"));
+        dirs.push(PathBuf::from("/usr/local/bin"));
+    }
+    dirs.into_iter()
+        .map(|dir| dir.join(&name))
+        .find(|candidate| candidate.is_file())
+        .unwrap_or_else(|| PathBuf::from("ank"))
+}
+
 /// `ank tui` for the human at the pane: run with the corpus as its cwd, and
 /// not `--repo`, which ank 0.8.0's TUI passes to its child calls before the
 /// verb, where the CLI rejects it (haksolot/ank#495). The environment is left
 /// as the user has it, `ANK_AGENT` included: what they claim from the TUI is
 /// theirs.
 pub fn tui_command(repo: &Path) -> Command {
-    let mut command = Command::new("ank");
+    let mut command = Command::new(program());
     command.arg("tui").current_dir(repo);
     command
 }

@@ -285,11 +285,43 @@ fn sync_pass(
     name: &str,
     panes: impl Fn(&std::path::Path) -> Vec<serde_json::Value>,
 ) -> Vec<support::Call> {
+    sync_pass_with(name, panes, AnkAt::OnPath)
+}
+
+/// Where the fake ank lives, as herdr's environment may leave it.
+#[derive(Clone, Copy, PartialEq)]
+enum AnkAt {
+    /// Next to the fake herdr, which is `PATH`.
+    OnPath,
+    /// Next to the fake herdr, and `PATH` holds neither.
+    BesideHerdr,
+    /// In `<home>/.local/bin`, and `PATH` holds neither.
+    HomeLocalBin,
+}
+
+fn sync_pass_with(
+    name: &str,
+    panes: impl Fn(&std::path::Path) -> Vec<serde_json::Value>,
+    ank_at: AnkAt,
+) -> Vec<support::Call> {
     let dir = tempdir(name);
     let bin = dir.join("bin");
     fs::create_dir_all(&bin).unwrap();
     let herdr = support::link(&bin, "herdr");
-    support::link(&bin, "ank");
+    let home = dir.join("home");
+    let ank_dir = match ank_at {
+        AnkAt::OnPath | AnkAt::BesideHerdr => bin.clone(),
+        AnkAt::HomeLocalBin => home.join(".local").join("bin"),
+    };
+    fs::create_dir_all(&ank_dir).unwrap();
+    support::link(&ank_dir, "ank");
+    let path = if ank_at == AnkAt::OnPath {
+        bin.clone()
+    } else {
+        let empty = dir.join("empty");
+        fs::create_dir_all(&empty).unwrap();
+        empty
+    };
     let repo = dir.join("repo");
     fs::create_dir_all(repo.join(".ank")).unwrap();
     let panes = panes(&repo);
@@ -324,20 +356,21 @@ fn sync_pass(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ank/status.json"),
     )
     .unwrap();
-    support::write_answers(
-        &bin,
-        &[
-            support::answer(&["pane", "list"], &panes.to_string(), "", 0),
-            support::answer(&["agent", "list"], &agents.to_string(), "", 0),
-            support::answer(&["find"], &find.to_string(), "", 0),
-            support::answer(&["context"], &context.to_string(), "", 0),
-            support::answer(&["status"], &status, "", 0),
-        ],
-    );
+    let answers = [
+        support::answer(&["pane", "list"], &panes.to_string(), "", 0),
+        support::answer(&["agent", "list"], &agents.to_string(), "", 0),
+        support::answer(&["find"], &find.to_string(), "", 0),
+        support::answer(&["context"], &context.to_string(), "", 0),
+        support::answer(&["status"], &status, "", 0),
+    ];
+    support::write_answers(&bin, &answers);
+    support::write_answers(&ank_dir, &answers);
 
     let output = Command::new(env!("CARGO_BIN_EXE_herdr-ank"))
         .arg("sync")
-        .env("PATH", &bin)
+        .env("PATH", &path)
+        .env("HOME", &home)
+        .env("USERPROFILE", &home)
         .env("HERDR_BIN_PATH", &herdr)
         .env("HERDR_SOCKET_PATH", dir.join("herdr.sock"))
         .env("HERDR_PLUGIN_CONFIG_DIR", &dir)
@@ -350,7 +383,11 @@ fn sync_pass(
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    support::calls(&bin)
+    let mut calls = support::calls(&bin);
+    if ank_dir != bin {
+        calls.extend(support::calls(&ank_dir));
+    }
+    calls
 }
 
 fn call<'a>(calls: &'a [support::Call], prefix: &[&str]) -> &'a support::Call {
@@ -573,4 +610,30 @@ fn a_welcome_herdr_refused_leaves_no_marker_and_is_sent_again() {
 
     daemon_start(&state, &bin);
     assert_eq!(notifications(&bin).len(), 2, "sent again at the next start");
+}
+
+fn one_agent_pane(repo: &std::path::Path) -> Vec<serde_json::Value> {
+    vec![serde_json::json!({
+        "pane_id": "w1:p2", "workspace_id": "w1", "tab_id": "w1:t1",
+        "cwd": repo, "agent": "claude", "agent_status": "working",
+        "focused": false, "revision": 1,
+    })]
+}
+
+#[test]
+fn a_sync_finds_ank_beside_herdr_when_path_lacks_it() {
+    let calls = sync_pass_with("ank-beside-herdr", one_agent_pane, AnkAt::BesideHerdr);
+    call(&calls, &["find"]);
+    assert!(call(&calls, &["pane", "report-metadata"])
+        .argv
+        .contains(&"claude · TASK-416c".to_string()));
+}
+
+#[test]
+fn a_sync_finds_ank_in_the_home_local_bin_when_path_lacks_it() {
+    let calls = sync_pass_with("ank-home-local", one_agent_pane, AnkAt::HomeLocalBin);
+    call(&calls, &["find"]);
+    assert!(call(&calls, &["pane", "report-metadata"])
+        .argv
+        .contains(&"claude · TASK-416c".to_string()));
 }
