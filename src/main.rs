@@ -23,6 +23,8 @@ enum Command {
     Work,
     /// Open `ank tui` over the current workspace's corpus.
     Tui,
+    /// Open the `tui` overlay over the invoking workspace ([[actions]] open).
+    Open,
     /// The popup `work` opens: choose a claimable task.
     Pick,
 }
@@ -34,6 +36,7 @@ impl Command {
             Command::Sync => "sync",
             Command::Work => "work",
             Command::Tui => "tui",
+            Command::Open => "open",
             Command::Pick => "pick",
         }
     }
@@ -43,6 +46,9 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     if let Command::Tui = cli.command {
         return herdr_ank::tui::run();
+    }
+    if let Command::Open = cli.command {
+        return herdr_ank::tui::open();
     }
     let result = match cli.command {
         Command::Work => run_work(),
