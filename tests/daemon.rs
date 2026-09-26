@@ -637,3 +637,207 @@ fn a_sync_finds_ank_in_the_home_local_bin_when_path_lacks_it() {
         .argv
         .contains(&"claude · TASK-416c".to_string()));
 }
+
+/// A plugin root holding a copy of herdr-ank at `bin/herdr-ank`, a state dir,
+/// a config polling every second, and the fake herdr and ank in `fakes/`.
+struct PluginRoot {
+    root: PathBuf,
+    state: PathBuf,
+    fakes: PathBuf,
+}
+
+impl PluginRoot {
+    fn new(name: &str) -> Self {
+        let dir = tempdir(name);
+        let root = dir.join("root");
+        fs::create_dir_all(root.join("bin")).unwrap();
+        fs::copy(env!("CARGO_BIN_EXE_herdr-ank"), Self::binary_in(&root)).unwrap();
+        let state = dir.join("state");
+        fs::create_dir_all(&state).unwrap();
+        fs::write(state.join("config.toml"), "[sync]\npoll_seconds = 1\n").unwrap();
+        let fakes = dir.join("fakes");
+        fs::create_dir_all(&fakes).unwrap();
+        support::link(&fakes, "herdr");
+        support::link(&fakes, "ank");
+        PluginRoot { root, state, fakes }
+    }
+
+    fn binary_in(root: &std::path::Path) -> PathBuf {
+        root.join("bin")
+            .join(format!("herdr-ank{}", std::env::consts::EXE_SUFFIX))
+    }
+
+    fn binary(&self) -> PathBuf {
+        Self::binary_in(&self.root)
+    }
+
+    /// Moves the binary aside, as a running executable can be moved on every
+    /// OS but not overwritten on Windows.
+    fn remove_binary(&self) {
+        let aside = self
+            .root
+            .join(format!("gone-{}", NEXT_DIR.fetch_add(1, Ordering::SeqCst)));
+        fs::rename(self.binary(), aside).unwrap();
+    }
+
+    /// Puts a new copy in place, with a modification time of its own.
+    fn replace_binary(&self) {
+        self.remove_binary();
+        fs::copy(env!("CARGO_BIN_EXE_herdr-ank"), self.binary()).unwrap();
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .open(self.binary())
+            .unwrap();
+        file.set_modified(std::time::SystemTime::now() + Duration::from_secs(60))
+            .unwrap();
+    }
+
+    /// `bin/herdr-ank daemon`, as herdr runs it, its stderr into `err`.
+    fn start(&self, err: &std::path::Path) -> Running {
+        Running(spawn_copied(
+            Command::new(self.binary())
+                .arg("daemon")
+                .current_dir(&self.root)
+                .env("PATH", &self.fakes)
+                .env(
+                    "HERDR_BIN_PATH",
+                    self.fakes
+                        .join(format!("herdr{}", std::env::consts::EXE_SUFFIX)),
+                )
+                .env("HERDR_SOCKET_PATH", self.state.join("absent.sock"))
+                .env("HERDR_PLUGIN_ROOT", &self.root)
+                .env("HERDR_PLUGIN_CONFIG_DIR", &self.state)
+                .env("HERDR_PLUGIN_STATE_DIR", &self.state)
+                .stdout(Stdio::null())
+                .stderr(fs::File::create(err).unwrap()),
+        ))
+    }
+
+    fn lock_held(&self) -> bool {
+        Lock::acquire(&self.state).unwrap().is_none()
+    }
+}
+
+/// Spawns a copied binary. A test forking at the moment `fs::copy` holds it
+/// open for writing makes exec fail with ETXTBSY until that child execs, so
+/// that one error is waited out.
+fn spawn_copied(command: &mut Command) -> std::process::Child {
+    let started = Instant::now();
+    loop {
+        match command.spawn() {
+            Err(err)
+                if err.kind() == std::io::ErrorKind::ExecutableFileBusy
+                    && started.elapsed() < Duration::from_secs(5) =>
+            {
+                std::thread::sleep(ms(20))
+            }
+            other => return other.unwrap(),
+        }
+    }
+}
+
+/// Waits up to ten seconds for `until`, polling.
+fn within_ten_seconds(mut until: impl FnMut() -> bool) -> bool {
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_secs(10) {
+        if until() {
+            return true;
+        }
+        std::thread::sleep(ms(50));
+    }
+    false
+}
+
+#[test]
+fn a_daemon_whose_binary_is_replaced_hands_over_to_the_new_one() {
+    let plugin = PluginRoot::new("handover");
+    let err = plugin.state.with_file_name("first.err");
+    let mut first = plugin.start(&err);
+    assert!(
+        within_ten_seconds(|| fs::read_to_string(&err).unwrap().contains("daemon: sync")),
+        "the first daemon never synced: {}",
+        fs::read_to_string(&err).unwrap()
+    );
+
+    plugin.replace_binary();
+    let mut exit = None;
+    assert!(
+        within_ten_seconds(|| {
+            exit = first.0.try_wait().unwrap();
+            exit.is_some()
+        }),
+        "the first daemon kept running on a replaced binary: {}",
+        fs::read_to_string(&err).unwrap()
+    );
+    assert!(exit.unwrap().success(), "{:?}", exit);
+    assert!(
+        within_ten_seconds(|| plugin.lock_held()),
+        "no new daemon took the lock: {}",
+        fs::read_to_string(&err).unwrap()
+    );
+
+    // The new daemon runs detached: moving its binary away stops it too.
+    plugin.remove_binary();
+    assert!(
+        within_ten_seconds(|| !plugin.lock_held()),
+        "the new daemon kept running without its binary"
+    );
+}
+
+#[test]
+fn a_daemon_whose_binary_is_gone_exits_without_a_successor() {
+    let plugin = PluginRoot::new("binary-gone");
+    let err = plugin.state.with_file_name("daemon.err");
+    let mut daemon = plugin.start(&err);
+    assert!(
+        within_ten_seconds(|| fs::read_to_string(&err).unwrap().contains("daemon: sync")),
+        "the daemon never synced: {}",
+        fs::read_to_string(&err).unwrap()
+    );
+
+    plugin.remove_binary();
+    let mut exit = None;
+    assert!(
+        within_ten_seconds(|| {
+            exit = daemon.0.try_wait().unwrap();
+            exit.is_some()
+        }),
+        "the daemon kept running without its binary"
+    );
+    assert!(exit.unwrap().success(), "{:?}", exit);
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(!plugin.lock_held(), "something took the lock after it");
+}
+
+#[test]
+fn without_a_plugin_root_the_daemon_keeps_running() {
+    let plugin = PluginRoot::new("no-root");
+    let err = plugin.state.with_file_name("daemon.err");
+    let mut command = Command::new(plugin.binary());
+    command
+        .arg("daemon")
+        .env_remove("HERDR_PLUGIN_ROOT")
+        .env("PATH", &plugin.fakes)
+        .env(
+            "HERDR_BIN_PATH",
+            plugin
+                .fakes
+                .join(format!("herdr{}", std::env::consts::EXE_SUFFIX)),
+        )
+        .env("HERDR_SOCKET_PATH", plugin.state.join("absent.sock"))
+        .env("HERDR_PLUGIN_CONFIG_DIR", &plugin.state)
+        .env("HERDR_PLUGIN_STATE_DIR", &plugin.state)
+        .stdout(Stdio::null())
+        .stderr(fs::File::create(&err).unwrap());
+    let mut daemon = Running(spawn_copied(&mut command));
+    assert!(within_ten_seconds(|| fs::read_to_string(&err)
+        .unwrap()
+        .contains("daemon: sync")));
+    plugin.replace_binary();
+    std::thread::sleep(Duration::from_millis(2500));
+    assert!(
+        daemon.0.try_wait().unwrap().is_none(),
+        "it exited: {}",
+        fs::read_to_string(&err).unwrap()
+    );
+}

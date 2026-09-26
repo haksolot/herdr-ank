@@ -168,8 +168,10 @@ fn parse_utc(s: &str) -> Option<u64> {
 
 /// `herdr-ank daemon`.
 pub fn run() -> Result<(), String> {
+    // Before anything else: the binary may be replaced while this one starts.
+    let binary = Binary::of_plugin();
     let state_dir = env_path("HERDR_PLUGIN_STATE_DIR")?;
-    let Some(_lock) =
+    let Some(lock) =
         Lock::acquire(&state_dir).map_err(|e| format!("herdr-ank daemon: lock: {e}"))?
     else {
         // Every [[events]] hook lands here while the daemon lives
@@ -196,6 +198,11 @@ pub fn run() -> Result<(), String> {
     let mut schedule = Schedule::new(MIN_GAP, poll);
     let mut notifier = Notifier::default();
     loop {
+        if let Some(binary) = binary.as_ref().filter(|binary| binary.changed()) {
+            drop(lock);
+            binary.hand_over();
+            return Ok(());
+        }
         let now = Instant::now();
         if schedule.due(now) {
             match sync_once(&herdr, &config) {
@@ -231,6 +238,75 @@ fn welcome(herdr: &herdr::Client, state_dir: &Path) {
     }
     if let Err(err) = fs::write(&marker, "") {
         eprintln!("herdr-ank daemon: welcome marker: {err}");
+    }
+}
+
+/// The plugin's own binary, `$HERDR_PLUGIN_ROOT/bin/herdr-ank`, as it was
+/// when the daemon started. herdr replaces it on an update and leaves this
+/// process running, holding the lock the new version's hooks give way to.
+struct Binary {
+    root: PathBuf,
+    path: PathBuf,
+    stamp: Option<(u64, Option<SystemTime>)>,
+}
+
+impl Binary {
+    fn of_plugin() -> Option<Binary> {
+        let root = std::env::var_os("HERDR_PLUGIN_ROOT").filter(|root| !root.is_empty())?;
+        let root = PathBuf::from(root);
+        let path = root
+            .join("bin")
+            .join(format!("herdr-ank{}", std::env::consts::EXE_SUFFIX));
+        let stamp = Self::stamp(&path);
+        Some(Binary { root, path, stamp })
+    }
+
+    fn stamp(path: &Path) -> Option<(u64, Option<SystemTime>)> {
+        fs::metadata(path)
+            .ok()
+            .map(|meta| (meta.len(), meta.modified().ok()))
+    }
+
+    /// Replaced or gone, including gone since before the daemon looked.
+    fn changed(&self) -> bool {
+        let now = Self::stamp(&self.path);
+        now.is_none() || now != self.stamp
+    }
+
+    /// Starts the binary now in place, once this process holds no lock, and
+    /// leaves it running when this one exits.
+    fn hand_over(&self) {
+        if !self.path.is_file() {
+            eprintln!("herdr-ank daemon: {} is gone, exiting", self.path.display());
+            return;
+        }
+        eprintln!(
+            "herdr-ank daemon: {} changed, handing over",
+            self.path.display()
+        );
+        let mut command = std::process::Command::new(&self.path);
+        command
+            .arg("daemon")
+            .current_dir(&self.root)
+            .stdin(std::process::Stdio::null());
+        // A binary just written may still be open for writing in a child
+        // forked meanwhile, until that child execs.
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match command.spawn() {
+                Err(err)
+                    if err.kind() == io::ErrorKind::ExecutableFileBusy
+                        && Instant::now() < deadline =>
+                {
+                    thread::sleep(Duration::from_millis(20))
+                }
+                Err(err) => {
+                    eprintln!("herdr-ank daemon: starting {}: {err}", self.path.display());
+                    return;
+                }
+                Ok(_) => return,
+            }
+        }
     }
 }
 
