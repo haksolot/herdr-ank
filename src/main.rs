@@ -29,6 +29,8 @@ enum Command {
     Land,
     /// The popup `work` and `land` open: choose a task.
     Pick,
+    /// Add the prefix+a key and the sidebar rows to herdr's config.toml, once.
+    Setup,
 }
 
 impl Command {
@@ -41,6 +43,7 @@ impl Command {
             Command::Open => "open",
             Command::Land => "land",
             Command::Pick => "pick",
+            Command::Setup => "setup",
         }
     }
 }
@@ -52,6 +55,9 @@ fn main() -> ExitCode {
     }
     if let Command::Open = cli.command {
         return herdr_ank::tui::open();
+    }
+    if let Command::Setup = cli.command {
+        return herdr_ank::setup::run();
     }
     let result = match cli.command {
         Command::Work => run_work(),

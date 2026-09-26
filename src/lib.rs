@@ -7,6 +7,7 @@ pub mod herdr;
 pub mod land;
 pub mod notify;
 pub mod pick;
+pub mod setup;
 pub mod sync;
 pub mod tui;
 pub mod work;
