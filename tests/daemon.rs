@@ -15,7 +15,9 @@ static NEXT_DIR: AtomicUsize = AtomicUsize::new(0);
 
 fn tempdir(name: &str) -> PathBuf {
     let n = NEXT_DIR.fetch_add(1, Ordering::SeqCst);
-    let dir = std::env::temp_dir().join(format!(
+    // Under the target dir, where the fake is hard-linked rather than
+    // copied: a tmpfs /tmp fills up with one copy per test.
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
         "herdr-ank-daemon-{}-{name}-{n}",
         std::process::id()
     ));
@@ -440,41 +442,54 @@ fn calls_so_far(bin: &std::path::Path) -> Vec<support::Call> {
         .collect()
 }
 
+/// A daemon the test started, killed however the test ends: a panic must not
+/// leave it running.
+struct Running(std::process::Child);
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
 /// Starts `herdr-ank daemon` on `state_dir` against the fake herdr of `bin/`,
-/// waits for its first sync (`pane list`, which comes after the welcome),
-/// stops it and hands back what herdr was asked.
-fn daemon_start(state_dir: &std::path::Path, bin: &std::path::Path) -> Vec<support::Call> {
+/// waits for its first sync, which comes after the welcome, and stops it.
+/// Its stderr is the signal: the fakes the daemon runs at once may garble a
+/// line of `calls.jsonl`, but the welcome goes out before any of them.
+fn daemon_start(state_dir: &std::path::Path, bin: &std::path::Path) {
     let herdr = bin.join(format!("herdr{}", std::env::consts::EXE_SUFFIX));
-    let before = calls_so_far(bin).len();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_herdr-ank"))
-        .arg("daemon")
-        .env("PATH", bin)
-        .env("HERDR_BIN_PATH", &herdr)
-        .env("HERDR_SOCKET_PATH", state_dir.join("absent.sock"))
-        .env("HERDR_PLUGIN_CONFIG_DIR", state_dir)
-        .env("HERDR_PLUGIN_STATE_DIR", state_dir)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let err = state_dir.with_file_name("daemon.err");
+    let mut daemon = Running(
+        Command::new(env!("CARGO_BIN_EXE_herdr-ank"))
+            .arg("daemon")
+            .env("PATH", bin)
+            .env("HERDR_BIN_PATH", &herdr)
+            .env("HERDR_SOCKET_PATH", state_dir.join("absent.sock"))
+            .env("HERDR_PLUGIN_CONFIG_DIR", state_dir)
+            .env("HERDR_PLUGIN_STATE_DIR", state_dir)
+            .stdout(Stdio::null())
+            .stderr(fs::File::create(&err).unwrap())
+            .spawn()
+            .unwrap(),
+    );
     let started = Instant::now();
     let synced = loop {
-        let calls = calls_so_far(bin);
-        if calls[before.min(calls.len())..]
-            .iter()
-            .any(|c| c.argv.starts_with(&["pane".into(), "list".into()]))
-        {
+        let said = fs::read_to_string(&err).unwrap_or_default();
+        if said.contains("herdr-ank daemon: sync") {
             break true;
         }
-        if child.try_wait().unwrap().is_some() || started.elapsed() > Duration::from_secs(10) {
+        if daemon.0.try_wait().unwrap().is_some() || started.elapsed() > Duration::from_secs(10) {
             break false;
         }
         std::thread::sleep(ms(20));
     };
-    let _ = child.kill();
-    let _ = child.wait();
-    assert!(synced, "the daemon never ran its first sync");
-    calls_so_far(bin).split_off(before)
+    drop(daemon);
+    assert!(
+        synced,
+        "the daemon never ran its first sync; it said: {}",
+        fs::read_to_string(&err).unwrap_or_default()
+    );
 }
 
 /// A state dir and a `bin/` holding the fake herdr and ank; `notification
@@ -500,9 +515,10 @@ fn welcome_setup(name: &str, notify_code: u8) -> (PathBuf, PathBuf) {
     (state, bin)
 }
 
-fn notifications(calls: &[support::Call]) -> Vec<&support::Call> {
-    calls
-        .iter()
+/// The welcomes herdr was asked for so far.
+fn notifications(bin: &std::path::Path) -> Vec<support::Call> {
+    calls_so_far(bin)
+        .into_iter()
         .filter(|c| c.argv.starts_with(&["notification".into(), "show".into()]))
         .collect()
 }
@@ -520,10 +536,10 @@ fn state_files(state: &std::path::Path) -> Vec<String> {
 #[test]
 fn the_first_daemon_start_sends_one_welcome_naming_the_sidebar_tokens() {
     let (state, bin) = welcome_setup("welcome-first", 0);
-    let calls = daemon_start(&state, &bin);
+    daemon_start(&state, &bin);
 
-    let told = notifications(&calls);
-    assert_eq!(told.len(), 1, "{calls:#?}");
+    let told = notifications(&bin);
+    assert_eq!(told.len(), 1, "{told:#?}");
     let argv = &told[0].argv;
     let title = &argv[2];
     assert!(title.contains("ank"), "{argv:?}");
@@ -544,17 +560,17 @@ fn the_first_daemon_start_sends_one_welcome_naming_the_sidebar_tokens() {
 fn a_later_daemon_start_sends_no_welcome() {
     let (state, bin) = welcome_setup("welcome-again", 0);
     daemon_start(&state, &bin);
-    let calls = daemon_start(&state, &bin);
-    assert!(notifications(&calls).is_empty(), "{calls:#?}");
+    daemon_start(&state, &bin);
+    assert_eq!(notifications(&bin).len(), 1, "one welcome over two starts");
 }
 
 #[test]
 fn a_welcome_herdr_refused_leaves_no_marker_and_is_sent_again() {
     let (state, bin) = welcome_setup("welcome-refused", 1);
-    let calls = daemon_start(&state, &bin);
-    assert_eq!(notifications(&calls).len(), 1, "{calls:#?}");
+    daemon_start(&state, &bin);
+    assert_eq!(notifications(&bin).len(), 1);
     assert!(state_files(&state).is_empty(), "{:?}", state_files(&state));
 
-    let calls = daemon_start(&state, &bin);
-    assert_eq!(notifications(&calls).len(), 1, "sent again: {calls:#?}");
+    daemon_start(&state, &bin);
+    assert_eq!(notifications(&bin).len(), 2, "sent again at the next start");
 }
