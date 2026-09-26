@@ -5,7 +5,7 @@ slug: module-land-pr-conditions-rebase-et-fast-forward
 title: "Module land : préconditions, rebase et fast-forward d'une branche de tâche, sans rien nettoyer"
 created: 2026-09-26T09:47:36Z
 author: haksolot@vmi3223161
-status: open
+status: in_progress
 scope:
   - src/land/**
   - tests/land.rs
@@ -21,7 +21,7 @@ criteria_by: creator
 verify: [cargo-test, clippy, fmt-check]
 method: tdd
 schema: 4
-version: 1
+version: 2
 ---
 
 Le cœur du landing, séparé de l'action et du nettoyage pour être testé contre git seul. Règles : ADR-ff4569057dc5 (proposée). Aucun appel herdr ici, aucune suppression de branche ni de worktree : c'est la tâche de l'action.
