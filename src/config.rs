@@ -20,6 +20,7 @@ pub struct Config {
     pub agent: AgentConfig,
     pub sync: SyncConfig,
     pub notify: NotifyConfig,
+    pub land: LandConfig,
 }
 
 /// The herdr agent the plugin starts for a task.
@@ -41,6 +42,17 @@ pub struct NotifyConfig {
     pub review: bool,
 }
 
+/// The cleanup steps that follow a landing, each one skippable. All default
+/// to true: a worktree removed under a tab left open strands its agent in a
+/// directory that no longer exists.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LandConfig {
+    pub close_tab: bool,
+    pub remove_worktree: bool,
+    pub delete_branch: bool,
+    pub delete_remote_branch: bool,
+}
+
 impl Default for Config {
     fn default() -> Self {
         Config {
@@ -53,6 +65,12 @@ impl Default for Config {
                 done: true,
                 expiring_minutes: 10,
                 review: true,
+            },
+            land: LandConfig {
+                close_tab: true,
+                remove_worktree: true,
+                delete_branch: true,
+                delete_remote_branch: true,
             },
         }
     }
@@ -137,6 +155,20 @@ impl Config {
             }
             if let Some(v) = notify.get("review") {
                 config.notify.review = boolean(v, "notify.review")?;
+            }
+        }
+        if let Some(land) = table(root, "land")? {
+            if let Some(v) = land.get("close_tab") {
+                config.land.close_tab = boolean(v, "land.close_tab")?;
+            }
+            if let Some(v) = land.get("remove_worktree") {
+                config.land.remove_worktree = boolean(v, "land.remove_worktree")?;
+            }
+            if let Some(v) = land.get("delete_branch") {
+                config.land.delete_branch = boolean(v, "land.delete_branch")?;
+            }
+            if let Some(v) = land.get("delete_remote_branch") {
+                config.land.delete_remote_branch = boolean(v, "land.delete_remote_branch")?;
             }
         }
         Ok(config)

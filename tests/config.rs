@@ -116,3 +116,69 @@ fn poll_seconds_thirty_one_is_refused_naming_key_and_bound() {
     assert!(err.contains("sync.poll_seconds"), "{err}");
     assert!(err.contains("30"), "{err}");
 }
+
+fn load(text: &str) -> Result<Config, String> {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("config.toml"), text).unwrap();
+    Config::load(dir.path()).map_err(|e| e.to_string())
+}
+
+#[test]
+fn land_cleanup_steps_all_default_to_true() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing_file = Config::load(dir.path()).unwrap();
+    let no_land_table = load("[sync]\npoll_seconds = 20\n").unwrap();
+    let empty_land_table = load("[land]\n").unwrap();
+
+    for config in [missing_file, no_land_table, empty_land_table] {
+        assert!(config.land.close_tab);
+        assert!(config.land.remove_worktree);
+        assert!(config.land.delete_branch);
+        assert!(config.land.delete_remote_branch);
+    }
+}
+
+#[test]
+fn each_land_step_reads_false_and_leaves_the_others_true() {
+    let config = load("[land]\nclose_tab = false\n").unwrap();
+    assert!(!config.land.close_tab);
+    assert!(config.land.remove_worktree && config.land.delete_branch);
+    assert!(config.land.delete_remote_branch);
+
+    let config = load("[land]\nremove_worktree = false\n").unwrap();
+    assert!(!config.land.remove_worktree);
+    assert!(config.land.close_tab && config.land.delete_branch);
+    assert!(config.land.delete_remote_branch);
+
+    let config = load("[land]\ndelete_branch = false\n").unwrap();
+    assert!(!config.land.delete_branch);
+    assert!(config.land.close_tab && config.land.remove_worktree);
+    assert!(config.land.delete_remote_branch);
+
+    let config = load("[land]\ndelete_remote_branch = false\n").unwrap();
+    assert!(!config.land.delete_remote_branch);
+    assert!(config.land.close_tab && config.land.remove_worktree);
+    assert!(config.land.delete_branch);
+}
+
+#[test]
+fn a_mistyped_land_key_is_an_error_that_names_it() {
+    for key in [
+        "close_tab",
+        "remove_worktree",
+        "delete_branch",
+        "delete_remote_branch",
+    ] {
+        let err = load(&format!("[land]\n{key} = \"no\"\n")).unwrap_err();
+        assert!(err.contains(&format!("land.{key}")), "{err}");
+    }
+    let err = load("land = true\n").unwrap_err();
+    assert!(err.contains("land"), "{err}");
+}
+
+#[test]
+fn an_unknown_key_under_land_is_ignored() {
+    let config = load("[land]\npush_main = true\nclose_tab = false\n").unwrap();
+    assert!(!config.land.close_tab);
+    assert!(config.land.delete_branch);
+}

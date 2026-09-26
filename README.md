@@ -198,12 +198,20 @@ plugin with an error naming that key.
 | `notify.done`             | boolean          | `true`     | notify when a task is finished                           |
 | `notify.expiring_minutes` | integer ≥ 0      | `10`       | notify when a claim has fewer minutes left; `0` turns it off |
 | `notify.review`           | boolean          | `true`     | notify when decisions are waiting to be ratified         |
+| `land.close_tab`          | boolean          | `true`     | after Land, close the task's tab                         |
+| `land.remove_worktree`    | boolean          | `true`     | after Land, remove the task's worktree                   |
+| `land.delete_branch`      | boolean          | `true`     | after Land, delete the local task branch                 |
+| `land.delete_remote_branch` | boolean        | `true`     | after Land, delete the task branch on the remote         |
 
 `sync.poll_seconds` cannot exceed 30. The synchronisation ADR
 (ADR-6fb76f3a1197) requires a sync at least every 30 seconds, and the sidebar
 tokens are reported with a 90-second ttl (SPEC-43438bbcb5ca), three times that
 maximum: a slower poll would let the tokens expire between two syncs and empty
 the sidebar.
+
+The `land.*` steps are all on by default. Turning off `land.close_tab` while
+`land.remove_worktree` stays on leaves an agent in a directory that no longer
+exists.
 
 ```toml
 [agent]
@@ -217,4 +225,10 @@ poll_seconds = 30
 done = true
 expiring_minutes = 10
 review = true
+
+[land]
+close_tab = true
+remove_worktree = true
+delete_branch = true
+delete_remote_branch = true
 ```
