@@ -66,14 +66,31 @@ herdr plugin link .
 
 | Function | Triggered by |
 |---|---|
-| **Sidebar tokens.** Each agent pane inside a corpus reports the task it holds, its title, the minutes left on the claim and the claimable count (tokens below). | The daemon (see *Daemon lifecycle*): it syncs on herdr events, on `ank watch`'s `events.jsonl` when it exists, and every `sync.poll_seconds`. |
+| **Sidebar.** Each agent pane inside a corpus shows `<agent> · TASK-xxxx` or `<agent> · ank` without configuration, and reports the task it holds, its title, the minutes left on the claim and the claimable count; each workspace reports its corpus's counts (see *Sidebar*). | The daemon (see *Daemon lifecycle*): it syncs on herdr events, on `ank watch`'s `events.jsonl` when it exists, and every `sync.poll_seconds`. |
 | **Work a task.** A popup lists the claimable tasks of the workspace's corpus, filtered as you type. The one you pick gets a worktree on `task/<short id>` cut from the default branch, a tab with `ANK_AGENT=<user>@<host>/ank-<short id>`, an agent of kind `agent.kind`, and the prompt `ank claim <id>`. If somebody else holds the task, you are notified and the worktree is kept. | The action *Work a task* in the command palette, or `herdr plugin action invoke work --plugin ank`. |
-| **ank tui.** `ank tui` over the corpus of the current workspace, as an overlay; `q` closes it. | `herdr plugin pane open --plugin ank --entrypoint tui`. |
+| **Ouvrir ank.** `ank tui` over the corpus of the current workspace, as an overlay; `q` closes it. | The action *Ouvrir ank* in the command palette, `herdr plugin action invoke open --plugin ank`, or a key (see *A key for Ouvrir ank*). |
 | **Notifications.** A task held by an agent pane is done (“TASK-xxxx terminée par ank-xxxx”), a claim has less than `notify.expiring_minutes` left (once per claim), the ratification queue grew (“N décisions en attente”, then `ank review`). | The daemon, between two syncs. |
+| **Welcome.** Once, on the first start: “ank suit vos agents”, naming the sidebar tokens below. | The first daemon of a herdr state dir; a notification herdr refused is sent again at the next start. |
 
 The worktrees go to `~/.herdr/worktrees/<repository>/ank-<short id>`.
 
 ## Sidebar
+
+### Without configuration
+
+Each agent pane inside a corpus gets a label, which the `agent` row of
+herdr's default sidebar shows in place of the agent's name:
+
+- `<agent> · TASK-xxxx` when the pane holds a claim, `claude · TASK-6da1`;
+- `<agent> · ank` otherwise, so you see which panes ank follows.
+
+The label is display only: herdr's `agent` field keeps the detected name,
+which the attribution below reads. It expires with the other reports.
+
+On its first start the daemon also sends one notification, “ank suit vos
+agents”, pointing here. It does not come back.
+
+### Agent panes
 
 herdr shows the tokens once your sidebar layout names them. In
 `~/.config/herdr/config.toml` (`herdr --help` prints the path on your system):
@@ -82,10 +99,12 @@ herdr shows the tokens once your sidebar layout names them. In
 [ui.sidebar.agents]
 rows = [
   ["state_icon", "machine", "workspace", "tab"],
-  ["agent", "$ank_task", "$ank_expires"],
+  ["agent", "$ank_expires"],
   [{ token = "$ank_title", dim = true }],
 ]
 ```
+
+The label already carries the task's id; `$ank_task` gives it alone.
 
 | Token | Value | Absent when |
 |---|---|---|
@@ -99,6 +118,44 @@ A claim is attributed to the pane whose herdr agent name ends its identity:
 `…/ank-6da1` goes to the agent named `ank-6da1`. Renaming the agent breaks
 that link. Every report expires after 90 s, so a stopped daemon empties the
 sidebar instead of showing a stale claim.
+
+### Spaces
+
+A workspace with at least one pane inside a corpus carries that corpus's
+counts; when its panes sit in several corpora, the one holding most of them.
+
+```toml
+[ui.sidebar.spaces]
+rows = [
+  ["state_icon", "workspace"],
+  ["branch", "git_status"],
+  ["$ank_queue", "$ank_claims", "$ank_review"],
+]
+```
+
+| Token | Value |
+|---|---|
+| `ank_queue` | claimable tasks in the corpus |
+| `ank_claims` | live claims in the corpus |
+| `ank_review` | decisions waiting to be ratified |
+
+All three are present on such a workspace, `0` included; a workspace without
+a pane in a corpus carries none.
+
+### A key for Ouvrir ank
+
+herdr runs a `[[keys.command]]` from the same `config.toml`. This binds
+`prefix+a` to the action:
+
+```toml
+[[keys.command]]
+key = "prefix+a"
+command = "herdr plugin action invoke open --plugin ank"
+description = "Ouvrir ank"
+```
+
+`type = "plugin_action"` with `command = "ank.open"` does the same without a
+shell.
 
 ## Daemon lifecycle
 
