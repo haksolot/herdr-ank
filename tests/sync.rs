@@ -1,4 +1,4 @@
-//! `sync::plan` against SPEC-dbe3cf972f71 and ADR-fa8b6a103597: panes and
+//! `sync::plan` against SPEC-43438bbcb5ca and ADR-fa8b6a103597: panes and
 //! agents shaped like `herdr pane list` / `agent list`, corpora shaped like
 //! `ank find --status in_progress --json` and `ank context --json`.
 

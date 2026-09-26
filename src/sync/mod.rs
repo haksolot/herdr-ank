@@ -1,5 +1,5 @@
 //! From herdr's panes and ank's claims to the pane tokens of
-//! SPEC-dbe3cf972f71. `plan` is pure: the clients fetch, it decides.
+//! SPEC-43438bbcb5ca. `plan` is pure: the clients fetch, it decides.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -8,7 +8,7 @@ use crate::ank::{Context, Find};
 use crate::config::Config;
 use crate::herdr::Pane;
 
-/// The `--source` of every report (SPEC-dbe3cf972f71).
+/// The `--source` of every report (SPEC-43438bbcb5ca).
 pub const SOURCE: &str = "ank:sync";
 
 pub const TASK: &str = "ank_task";
@@ -23,7 +23,7 @@ pub const REVIEW: &str = "ank_review";
 /// Every token the plugin owns, in the order the spec lists them.
 pub const TOKENS: [&str; 5] = [TASK, TITLE, EXPIRES, AMBIGUOUS, QUEUE];
 
-/// `--ttl-ms` of every report, fixed by SPEC-dbe3cf972f71.
+/// `--ttl-ms` of every report, fixed by SPEC-43438bbcb5ca.
 pub const TTL_MS: u64 = 90_000;
 
 const TITLE_CHARS: usize = 60;

@@ -23,7 +23,7 @@ pub use events::{subscribe_over, Event, Subscription};
 /// The plugin id, as `herdr-plugin.toml` declares it.
 pub const PLUGIN_ID: &str = "ank";
 
-/// The `--source` of every pane and workspace metadata report (SPEC-dbe3cf972f71).
+/// The `--source` of every pane and workspace metadata report (SPEC-43438bbcb5ca).
 pub const METADATA_SOURCE: &str = "ank:sync";
 
 #[derive(Debug)]

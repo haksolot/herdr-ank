@@ -12,7 +12,7 @@ use toml::{Table, Value};
 pub const FILE_NAME: &str = "config.toml";
 
 /// ADR-6fb76f3a1197 wants a sync at least every 30 s, and the sidebar tokens'
-/// 90 s ttl (SPEC-dbe3cf972f71) is three times that maximum.
+/// 90 s ttl (SPEC-43438bbcb5ca) is three times that maximum.
 pub const MAX_POLL_SECONDS: u64 = 30;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
