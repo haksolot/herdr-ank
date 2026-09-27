@@ -74,6 +74,22 @@ fn setup() -> Result<(), String> {
         Some(bin) if !bin.is_empty() => PathBuf::from(bin),
         _ => return Err("HERDR_BIN_PATH is not set; run setup from a herdr pane".into()),
     };
+    apply(&herdr).map(drop)
+}
+
+/// What a setup that succeeded did not write: one line per piece the user
+/// already set to something else, each also named on stderr with what to add
+/// by hand.
+#[derive(Debug, Default)]
+pub struct Outcome {
+    pub left: Vec<String>,
+}
+
+/// The whole of `herdr-ank setup` with `herdr` as herdr's binary; the first
+/// daemon of a state dir runs it too (ADR-2df155dab780). An `Err` names what
+/// failed, the config being as it was.
+pub fn apply(herdr: &Path) -> Result<Outcome, String> {
+    let herdr = herdr.to_path_buf();
     let path = config_path(&herdr)?;
     let (text, existed) = match fs::read_to_string(&path) {
         Ok(text) => (text, true),
@@ -93,19 +109,23 @@ fn setup() -> Result<(), String> {
         (sidebar(&config, "spaces", SPACES_ROWS), SPACES_BLOCK),
     ];
     let mut added = Vec::new();
+    let mut outcome = Outcome::default();
     for (found, block) in pieces {
         match found {
             Found::Missing => added.push(block),
             Found::Present => {}
-            Found::Taken { what, by_hand } => eprintln!(
-                "herdr-ank setup: {what} in {}; left intact. To add by hand:\n{by_hand}",
-                path.display()
-            ),
+            Found::Taken { what, by_hand } => {
+                eprintln!(
+                    "herdr-ank setup: {what} in {}; left intact. To add by hand:\n{by_hand}",
+                    path.display()
+                );
+                outcome.left.push(what);
+            }
         }
     }
     if added.is_empty() {
         println!("herdr-ank setup: nothing to add to {}", path.display());
-        return Ok(());
+        return Ok(outcome);
     }
 
     let backup = if existed {
@@ -180,7 +200,7 @@ fn setup() -> Result<(), String> {
             "herdr-ank setup: cannot run herdr server reload-config ({err}); herdr reads the file at its next start"
         ),
     }
-    Ok(())
+    Ok(outcome)
 }
 
 /// `$HERDR_CONFIG_PATH`, which herdr honours, else the `Config:` line of
@@ -222,11 +242,7 @@ fn key_binding(config: &Table) -> Found {
         .flatten()
         .filter_map(Value::as_table)
     {
-        if !command
-            .get("key")
-            .and_then(Value::as_str)
-            .is_some_and(is_key)
-        {
+        if !command.get("key").is_some_and(binds_key) {
             continue;
         }
         let runs = command.get("command").and_then(Value::as_str).unwrap_or("");
@@ -237,15 +253,20 @@ fn key_binding(config: &Table) -> Found {
         return taken(format!("{KEY} already runs `{runs}` ([[keys.command]])"));
     }
     for (action, binding) in keys {
-        if binding.as_str().is_some_and(is_key) {
+        if binds_key(binding) {
             return taken(format!("{KEY} is already bound to keys.{action}"));
         }
     }
     Found::Missing
 }
 
-fn is_key(binding: &str) -> bool {
-    binding.trim().eq_ignore_ascii_case(KEY)
+/// A binding is one key or a list of them (`["prefix+h", "alt+enter"]`).
+fn binds_key(binding: &Value) -> bool {
+    match binding {
+        Value::String(key) => key.trim().eq_ignore_ascii_case(KEY),
+        Value::Array(keys) => keys.iter().any(binds_key),
+        _ => false,
+    }
 }
 
 /// `[ui.sidebar.<section>]`: missing, already showing ank tokens, or the

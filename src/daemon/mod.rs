@@ -19,12 +19,18 @@ use crate::ank;
 use crate::config::Config;
 use crate::herdr::{self, Event, Sound, Subscription};
 use crate::notify::{Notifier, Observed};
+use crate::setup;
 use crate::sync::{self, Corpus};
 
 const LOCK_FILE: &str = "daemon.lock";
 
 /// Left in the state dir once the welcome was shown, so it is shown once.
 const WELCOME_MARKER: &str = "welcomed";
+
+/// Left in the state dir once the first daemon tried `herdr-ank setup`.
+const SETUP_MARKER: &str = "setup-tried";
+
+const SETUP_TITLE: &str = "ank n'a pas tout écrit dans la config de herdr";
 
 const WELCOME_TITLE: &str = "ank suit vos agents";
 
@@ -180,6 +186,7 @@ pub fn run() -> Result<(), String> {
     };
     let config = Config::load(&env_path("HERDR_PLUGIN_CONFIG_DIR")?).map_err(|e| e.to_string())?;
     let herdr = herdr::Client::from_env().map_err(|e| format!("herdr-ank daemon: {e}"))?;
+    configure_herdr(&herdr, &env_path("HERDR_BIN_PATH")?, &state_dir);
     welcome(&herdr, &state_dir);
 
     let (tx, rx) = mpsc::channel::<()>();
@@ -221,6 +228,40 @@ pub fn run() -> Result<(), String> {
             // Both feeders gone: only the poll is left.
             Err(RecvTimeoutError::Disconnected) => thread::sleep(schedule.wait(Instant::now())),
         }
+    }
+}
+
+/// The first daemon of a state dir runs `herdr-ank setup` once
+/// (ADR-2df155dab780): the marker is left after the attempt whatever came of
+/// it, so a block the user removes later is never put back. What it could not
+/// write is notified, and the daemon goes on.
+fn configure_herdr(herdr: &herdr::Client, bin: &Path, state_dir: &Path) {
+    let marker = state_dir.join(SETUP_MARKER);
+    if marker.exists() {
+        return;
+    }
+    let unwritten = match setup::apply(bin) {
+        Ok(outcome) => outcome.left.join(" ; "),
+        Err(err) => {
+            eprintln!("herdr-ank daemon: setup: {err}");
+            err.lines().next().unwrap_or_default().to_string()
+        }
+    };
+    if let Err(err) = fs::write(&marker, "") {
+        eprintln!("herdr-ank daemon: setup marker: {err}");
+    }
+    if unwritten.is_empty() {
+        return;
+    }
+    let setup = std::env::var_os("HERDR_PLUGIN_ROOT")
+        .map(|root| Path::new(&root).join("bin").join("herdr-ank"))
+        .map_or("herdr-ank".into(), |bin| bin.display().to_string());
+    let body = format!(
+        "{unwritten}. Pour le faire à la main : {setup} setup (herdr-ank setup, \
+voir la section Install du README)."
+    );
+    if let Err(err) = herdr.notification_show(SETUP_TITLE, Some(&body), Sound::None) {
+        eprintln!("herdr-ank daemon: setup notification: {err}");
     }
 }
 

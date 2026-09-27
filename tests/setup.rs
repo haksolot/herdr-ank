@@ -340,3 +340,43 @@ fn without_herdr_config_path_it_writes_where_herdr_help_says() {
     assert!(output.status.success(), "{}", stderr(&output));
     assert_ank_open_bound(&parsed(&dir));
 }
+
+#[test]
+fn a_custom_prefix_gets_the_same_prefix_relative_key() {
+    let dir = scratch("custom-prefix");
+    fake_herdr(&dir, ("config: ok\n", 0));
+    let mine =
+        "[keys]\nprefix = \"ctrl+space\"\nsplit_horizontal = [\"prefix+h\", \"alt+enter\"]\n";
+    fs::write(config_path(&dir), mine).unwrap();
+
+    let output = setup(&dir);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let config = parsed(&dir);
+    assert_eq!(config["keys"]["prefix"].as_str(), Some("ctrl+space"));
+    assert_ank_open_bound(&config);
+    let text = fs::read_to_string(config_path(&dir)).unwrap();
+    assert!(!text.contains("ctrl+space+a"), "{text}");
+    assert!(!text.contains("ctrl+b"), "{text}");
+}
+
+#[test]
+fn prefix_a_among_the_keys_of_a_builtin_action_is_a_conflict() {
+    let dir = scratch("builtin-list");
+    fake_herdr(&dir, ("config: ok\n", 0));
+    let mine = "[keys]\nprefix = \"ctrl+space\"\ntoggle_sidebar = [\"alt+s\", \"prefix+a\"]\n";
+    fs::write(config_path(&dir), mine).unwrap();
+
+    let output = setup(&dir);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let config = parsed(&dir);
+    assert!(
+        key_commands(&config).is_empty(),
+        "{:?}",
+        key_commands(&config)
+    );
+    let err = stderr(&output);
+    assert!(err.contains("toggle_sidebar"), "{err}");
+    assert!(err.contains(r#"command = "ank.open""#), "{err}");
+}

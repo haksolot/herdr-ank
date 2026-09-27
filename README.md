@@ -23,7 +23,24 @@ herdr plugin install haksolot/herdr-ank --yes  # without the prompt
 herdr plugin list --json                       # lists "ank"
 ```
 
-Then, once, from a herdr pane, run `herdr-ank setup` from the plugin's
+There is nothing else to run. The first time the plugin's daemon starts, right
+after the install or at herdr's next start, it runs `herdr-ank setup` once. That
+adds to herdr's `config.toml` what a plugin manifest cannot declare: the key
+`prefix+a` for *Ouvrir ank*, that is your prefix then `a`, whatever prefix
+`[keys]` sets, and the `[ui.sidebar.agents]` and `[ui.sidebar.spaces]` layouts
+of *Sidebar*. The file is the one `herdr --help` names
+(`~/.config/herdr/config.toml` on Linux and macOS), or `HERDR_CONFIG_PATH`.
+
+`setup` first copies it to `config.toml.bak-ank-<UTC timestamp>`, appends only
+what is missing, runs `herdr config check`, then `herdr server reload-config`.
+A key or a block you already set is never touched: if `prefix+a` is bound to
+something else, alone or in a list, or either sidebar block exists without the
+ank tokens, `setup` leaves it. If `herdr config check` refuses the result, the
+backup is restored. Either way the daemon sends a notification naming what it
+did not write, and goes on.
+
+The daemon tries once per plugin state directory: a block you remove afterwards
+stays removed. To run it again by hand, from a herdr pane, use the plugin's
 directory, the `plugin_root` that `herdr plugin list --plugin ank --json`
 prints:
 
@@ -31,18 +48,8 @@ prints:
 <plugin_root>/bin/herdr-ank setup
 ```
 
-`setup` adds to herdr's `config.toml` what a plugin manifest cannot declare:
-the key `prefix+a` (`ctrl+b a` by default) for *Ouvrir ank*, and the
-`[ui.sidebar.agents]` and `[ui.sidebar.spaces]` layouts of *Sidebar*. The file
-is the one `herdr --help` names (`~/.config/herdr/config.toml` on Linux and
-macOS), or `HERDR_CONFIG_PATH`. It first copies it to
-`config.toml.bak-ank-<UTC timestamp>`, appends only what is missing, runs
-`herdr config check`, then `herdr server reload-config`. A key or a block you
-already set is never touched: if `prefix+a` is bound to something else, or
-either sidebar block exists without the ank tokens, `setup` leaves it, and
-prints on stderr what to add by hand. If `herdr config check` refuses the
-result, the backup is restored and `setup` exits 1. Run again, it writes
-nothing.
+By hand it prints on stderr what to add yourself, and exits 1 when
+`herdr config check` refuses the result. Run again, it writes nothing.
 
 On Linux and macOS herdr runs the manifest's `[[build]]`, `sh install.sh`, in
 the plugin's directory. The script reads `version` from `herdr-plugin.toml`,
@@ -93,7 +100,7 @@ herdr plugin link .
 | **Sidebar.** Each agent pane inside a corpus shows `<agent> · TASK-xxxx` or `<agent> · ank` without configuration, and reports the task it holds, its title, the minutes left on the claim and the claimable count; each workspace reports its corpus's counts (see *Sidebar*). | The daemon (see *Daemon lifecycle*): it syncs on herdr events, on `ank watch`'s `events.jsonl` when it exists, and every `sync.poll_seconds`. |
 | **Work a task.** A popup lists the claimable tasks of the workspace's corpus, filtered as you type. The one you pick gets a worktree on `task/<short id>` cut from the default branch, a tab with `ANK_AGENT=<user>@<host>/ank-<short id>`, an agent of kind `agent.kind`, and the prompt `ank claim <id>`. If somebody else holds the task, you are notified and the worktree is kept. | `herdr plugin action invoke work --plugin ank`. |
 | **Land a task.** A popup lists the done tasks of the workspace's corpus whose branch `task/<short id>` exists and is not yet in the default branch, filtered as you type. The one you pick is rebased on the default branch in its worktree, then the default branch fast-forwards to it in the repository's main checkout; nothing is pushed but the deletion below. A refusal (task not done, uncommitted changes, a conflict, the default branch moving twice) notifies its cause and the command that lifts it, and removes nothing. Once landed, each step whose `land.*` key is true runs in order: the tabs with a pane inside the worktree close, the worktree is removed with the workspace herdr opened for it, `git branch -d task/<short id>`, and `git push origin --delete task/<short id>` when origin has the branch. A step that fails is notified and the next still runs; the last notification is “TASK-xxxx landée sur <default>”. | `herdr plugin action invoke land --plugin ank`. |
-| **Ouvrir ank.** `ank tui` over the corpus of the current workspace, as an overlay; `q` closes it. | `prefix+a` (`ctrl+b a` by default) once `herdr-ank setup` has run (see *A key for Ouvrir ank*), or `herdr plugin action invoke open --plugin ank`. |
+| **Ouvrir ank.** `ank tui` over the corpus of the current workspace, as an overlay; `q` closes it. | `prefix+a`, your prefix then `a` (see *A key for Ouvrir ank*), or `herdr plugin action invoke open --plugin ank`. |
 | **Notifications.** A task held by an agent pane is done (“TASK-xxxx terminée par ank-xxxx”), a claim has less than `notify.expiring_minutes` left (once per claim), the ratification queue grew (“N décisions en attente”, then `ank review`). | The daemon, between two syncs. |
 | **Welcome.** Once, on the first start: “ank suit vos agents”, naming the sidebar tokens below. | The first daemon of a herdr state dir; a notification herdr refused is sent again at the next start. |
 
@@ -117,9 +124,10 @@ agents”, pointing here. It does not come back.
 
 ### Agent panes
 
-herdr shows the tokens once your sidebar layout names them. `herdr-ank setup`
-writes this one into `~/.config/herdr/config.toml` (`herdr --help` prints the
-path on your system) unless you already have a `[ui.sidebar.agents]`:
+herdr shows the tokens once your sidebar layout names them. The first daemon,
+through `herdr-ank setup`, writes this one into `~/.config/herdr/config.toml`
+(`herdr --help` prints the path on your system) unless you already have a
+`[ui.sidebar.agents]`:
 
 ```toml
 [ui.sidebar.agents]
@@ -171,9 +179,9 @@ a pane in a corpus carries none.
 ### A key for Ouvrir ank
 
 A plugin cannot declare a key in herdr 0.9.1: herdr
-runs a `[[keys.command]]` from the same `config.toml`. `herdr-ank setup` adds
-this one, binding `prefix+a` (`ctrl+b a` with the default prefix) to the
-action, unless `prefix+a` is already bound:
+runs a `[[keys.command]]` from the same `config.toml`. The first daemon
+(see *Install*) adds this one through `herdr-ank setup`, binding `prefix+a`,
+your prefix then `a`, to the action, unless `prefix+a` is already bound:
 
 ```toml
 [[keys.command]]

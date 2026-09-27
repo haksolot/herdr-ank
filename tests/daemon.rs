@@ -219,12 +219,19 @@ fn a_bare_identity_claim_leaves_the_queue_counted() {
     assert_eq!(tokens.get("ank_queue"), Some(&"3"));
 }
 
+/// The herdr `config.toml` a daemon started on `state_dir` writes: beside the
+/// state dir, never the user's own, whatever the environment says.
+fn herdr_config(state_dir: &std::path::Path) -> PathBuf {
+    state_dir.with_file_name("herdr-config.toml")
+}
+
 /// Runs `herdr-ank daemon` as an `[[events]]` hook would (ADR-6fb76f3a1197).
 fn daemon_from_event(state_dir: &std::path::Path, event: &str) -> std::process::Child {
     Command::new(env!("CARGO_BIN_EXE_herdr-ank"))
         .arg("daemon")
         .env("HERDR_PLUGIN_EVENT", event)
         .env("HERDR_PLUGIN_STATE_DIR", state_dir)
+        .env("HERDR_CONFIG_PATH", herdr_config(state_dir))
         .env("HERDR_PLUGIN_CONFIG_DIR", state_dir)
         .env("HERDR_BIN_PATH", "/nonexistent/herdr")
         .env("HERDR_SOCKET_PATH", state_dir.join("absent.sock"))
@@ -505,6 +512,7 @@ fn daemon_start(state_dir: &std::path::Path, bin: &std::path::Path) {
             .env("HERDR_SOCKET_PATH", state_dir.join("absent.sock"))
             .env("HERDR_PLUGIN_CONFIG_DIR", state_dir)
             .env("HERDR_PLUGIN_STATE_DIR", state_dir)
+            .env("HERDR_CONFIG_PATH", herdr_config(state_dir))
             .stdout(Stdio::null())
             .stderr(fs::File::create(&err).unwrap())
             .spawn()
@@ -590,7 +598,11 @@ fn the_first_daemon_start_sends_one_welcome_naming_the_sidebar_tokens() {
     ] {
         assert!(body.contains(token), "the body names {token}: {body}");
     }
-    assert_eq!(state_files(&state), ["welcomed"], "a marker is left");
+    assert!(
+        state_files(&state).contains(&"welcomed".to_string()),
+        "a marker is left: {:?}",
+        state_files(&state)
+    );
 }
 
 #[test]
@@ -606,10 +618,144 @@ fn a_welcome_herdr_refused_leaves_no_marker_and_is_sent_again() {
     let (state, bin) = welcome_setup("welcome-refused", 1);
     daemon_start(&state, &bin);
     assert_eq!(notifications(&bin).len(), 1);
-    assert!(state_files(&state).is_empty(), "{:?}", state_files(&state));
+    assert!(
+        !state_files(&state).contains(&"welcomed".to_string()),
+        "{:?}",
+        state_files(&state)
+    );
 
     daemon_start(&state, &bin);
     assert_eq!(notifications(&bin).len(), 2, "sent again at the next start");
+}
+
+/// A state dir and a `bin/` holding the fake herdr and ank, `config check`
+/// answering `check`, and herdr's `config.toml` holding `config` (none when
+/// `None`).
+fn setup_env(name: &str, check: (&str, u8), config: Option<&str>) -> (PathBuf, PathBuf) {
+    let dir = tempdir(name);
+    let bin = dir.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    support::link(&bin, "herdr");
+    support::link(&bin, "ank");
+    support::write_answers(
+        &bin,
+        &[
+            support::answer(&["config", "check"], check.0, "", check.1),
+            support::answer(&["server", "reload-config"], "", "", 0),
+        ],
+    );
+    let state = dir.join("state");
+    fs::create_dir_all(&state).unwrap();
+    if let Some(config) = config {
+        fs::write(herdr_config(&state), config).unwrap();
+    }
+    (state, bin)
+}
+
+fn herdr_calls(bin: &std::path::Path, argv: &[&str]) -> usize {
+    calls_so_far(bin)
+        .into_iter()
+        .filter(|c| c.argv.iter().map(String::as_str).eq(argv.iter().copied()))
+        .count()
+}
+
+/// The notifications other than the welcome.
+fn setup_notifications(bin: &std::path::Path) -> Vec<String> {
+    notifications(bin)
+        .into_iter()
+        .map(|c| c.argv.join(" "))
+        .filter(|told| !told.contains("ank suit vos agents"))
+        .collect()
+}
+
+const USER_CONFIG: &str = "[keys]\nprefix = \"ctrl+space\"\n";
+
+#[test]
+fn the_first_daemon_start_writes_the_key_and_both_sidebars_into_herdr_config() {
+    let (state, bin) = setup_env("setup-first", ("config: ok\n", 0), Some(USER_CONFIG));
+    daemon_start(&state, &bin);
+
+    let text = fs::read_to_string(herdr_config(&state)).unwrap();
+    assert!(
+        text.starts_with(USER_CONFIG),
+        "the user's lines first:\n{text}"
+    );
+    let config: toml::Table = text.parse().unwrap();
+    assert_eq!(config["keys"]["prefix"].as_str(), Some("ctrl+space"));
+    let key = &config["keys"]["command"][0];
+    assert_eq!(key["key"].as_str(), Some("prefix+a"));
+    assert_eq!(key["command"].as_str(), Some("ank.open"));
+    assert!(text.contains("[ui.sidebar.agents]"), "{text}");
+    assert!(text.contains("[ui.sidebar.spaces]"), "{text}");
+    assert_eq!(herdr_calls(&bin, &["config", "check"]), 1);
+    assert_eq!(herdr_calls(&bin, &["server", "reload-config"]), 1);
+    assert!(
+        setup_notifications(&bin).is_empty(),
+        "nothing left to do by hand: {:?}",
+        setup_notifications(&bin)
+    );
+}
+
+#[test]
+fn a_later_daemon_start_leaves_herdr_config_alone_even_once_the_blocks_are_removed() {
+    let (state, bin) = setup_env("setup-once", ("config: ok\n", 0), Some(USER_CONFIG));
+    daemon_start(&state, &bin);
+    fs::write(herdr_config(&state), USER_CONFIG).unwrap();
+
+    daemon_start(&state, &bin);
+
+    assert_eq!(
+        fs::read_to_string(herdr_config(&state)).unwrap(),
+        USER_CONFIG,
+        "blocks the user removed stay removed"
+    );
+    assert_eq!(herdr_calls(&bin, &["config", "check"]), 1, "checked once");
+    assert_eq!(herdr_calls(&bin, &["server", "reload-config"]), 1);
+}
+
+#[test]
+fn a_prefix_a_taken_by_the_user_is_notified_with_herdr_ank_setup_and_the_daemon_goes_on() {
+    let mine = "[[keys.command]]\nkey = \"prefix+a\"\ncommand = \"lazygit\"\n";
+    let (state, bin) = setup_env("setup-conflict", ("config: ok\n", 0), Some(mine));
+    // daemon_start asserts the first sync ran after the setup.
+    daemon_start(&state, &bin);
+
+    let config: toml::Table = fs::read_to_string(herdr_config(&state))
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_eq!(config["keys"]["command"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        config["keys"]["command"][0]["command"].as_str(),
+        Some("lazygit")
+    );
+    let told = setup_notifications(&bin);
+    assert_eq!(told.len(), 1, "{told:?}");
+    assert!(told[0].contains("prefix+a"), "{told:?}");
+    assert!(told[0].contains("herdr-ank setup"), "{told:?}");
+}
+
+#[test]
+fn a_config_herdr_refuses_is_restored_and_notified() {
+    let (state, bin) = setup_env(
+        "setup-refused",
+        ("config: issues found\nunknown sidebar token\n", 1),
+        Some(USER_CONFIG),
+    );
+    daemon_start(&state, &bin);
+
+    assert_eq!(
+        fs::read_to_string(herdr_config(&state)).unwrap(),
+        USER_CONFIG
+    );
+    assert_eq!(herdr_calls(&bin, &["server", "reload-config"]), 0);
+    let told = setup_notifications(&bin);
+    assert_eq!(told.len(), 1, "{told:?}");
+    assert!(told[0].contains("herdr-ank setup"), "{told:?}");
+
+    daemon_start(&state, &bin);
+    assert_eq!(herdr_calls(&bin, &["config", "check"]), 1, "tried once");
+    assert_eq!(setup_notifications(&bin).len(), 1, "notified once");
 }
 
 fn one_agent_pane(repo: &std::path::Path) -> Vec<serde_json::Value> {
@@ -708,6 +854,7 @@ impl PluginRoot {
                 .env("HERDR_PLUGIN_ROOT", &self.root)
                 .env("HERDR_PLUGIN_CONFIG_DIR", &self.state)
                 .env("HERDR_PLUGIN_STATE_DIR", &self.state)
+                .env("HERDR_CONFIG_PATH", herdr_config(&self.state))
                 .stdout(Stdio::null())
                 .stderr(fs::File::create(err).unwrap()),
         ))
@@ -827,6 +974,7 @@ fn without_a_plugin_root_the_daemon_keeps_running() {
         .env("HERDR_SOCKET_PATH", plugin.state.join("absent.sock"))
         .env("HERDR_PLUGIN_CONFIG_DIR", &plugin.state)
         .env("HERDR_PLUGIN_STATE_DIR", &plugin.state)
+        .env("HERDR_CONFIG_PATH", herdr_config(&plugin.state))
         .stdout(Stdio::null())
         .stderr(fs::File::create(&err).unwrap());
     let mut daemon = Running(spawn_copied(&mut command));
