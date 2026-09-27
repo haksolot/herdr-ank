@@ -5,14 +5,18 @@ slug: le-premier-daemon-d-un-state-dir-lance-herdr-ank
 title: Le premier daemon d'un state dir lance herdr-ank setup une fois, sans que l'utilisateur ait à le faire
 created: 2026-09-27T07:29:38Z
 author: haksolot@omarchy
-status: proposed
+status: accepted
 scope:
   - src/daemon/**
   - src/setup.rs
 constraint: |
   Au premier démarrage du daemon dans un state dir ($HERDR_PLUGIN_STATE_DIR), avant la première sync, le daemon exécute la logique de herdr-ank setup telle quelle : ajout seulement, jamais d'écrasement d'une clé ou d'un bloc de l'utilisateur, sauvegarde config.toml.bak-ank-<horodatage>, herdr config check avec restauration en cas de refus, puis herdr server reload-config, le tout par $HERDR_BIN_PATH (ADR-357c). Un marqueur dans le state dir, posé après la tentative quel qu'en soit le résultat, fait qu'elle n'a lieu qu'une fois : un bloc retiré ensuite par l'utilisateur n'est jamais remis. Si un bloc est laissé (conflit ou disposition existante) ou si la tentative échoue, le daemon envoie une notification herdr qui nomme ce qui n'a pas été écrit et renvoie à herdr-ank setup ; il continue normalement. Le [[build]] (install.sh, install.ps1) ne touche jamais le config.toml de herdr. La commande herdr-ank setup reste disponible à la main.
+ratified: d548a68ebe8e
+verified:
+  - by: haksolot@omarchy
+    at: 2026-09-27T07:31:51Z
 schema: 4
-version: 1
+version: 2
 ---
 
 ## Contexte
